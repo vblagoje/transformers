@@ -2,6 +2,7 @@ import argparse
 import glob
 import logging
 import os
+from importlib import import_module
 
 import numpy as np
 import torch
@@ -10,8 +11,7 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, TensorDataset
 
 from lightning_base import BaseTransformer, add_generic_args, generic_train
-from utils_ner import convert_examples_to_features, get_labels, read_examples_from_file
-
+from utils_ner import TokenClassificationTask
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +24,18 @@ class NERTransformer(BaseTransformer):
     mode = "token-classification"
 
     def __init__(self, hparams):
-        self.labels = get_labels(hparams.labels)
-        num_labels = len(self.labels)
+        module = import_module('tasks')
+        try:
+            token_classification_task_clazz = getattr(module, hparams.task_type)
+            self.token_classification_task: TokenClassificationTask = token_classification_task_clazz()
+        except AttributeError:
+            raise ValueError(
+                f"Task {hparams.task_type} needs to be defined as a TokenClassificationTask subclass in {module}. "
+                f"Available tasks classes are: {TokenClassificationTask.__subclasses__()}"
+            )
+        self.labels = self.token_classification_task.get_labels(hparams.labels)
         self.pad_token_label_id = CrossEntropyLoss().ignore_index
-        super().__init__(hparams, num_labels, self.mode)
+        super().__init__(hparams,  len(self.labels), self.mode)
 
     def forward(self, **inputs):
         return self.model(**inputs)
@@ -55,8 +63,8 @@ class NERTransformer(BaseTransformer):
                 features = torch.load(cached_features_file)
             else:
                 logger.info("Creating features from dataset file at %s", args.data_dir)
-                examples = read_examples_from_file(args.data_dir, mode)
-                features = convert_examples_to_features(
+                examples = self.token_classification_task.read_examples_from_file(args.data_dir, mode)
+                features = self.token_classification_task.convert_examples_to_features(
                     examples,
                     self.labels,
                     args.max_seq_length,
@@ -154,6 +162,12 @@ class NERTransformer(BaseTransformer):
     def add_model_specific_args(parser, root_dir):
         # Add NER specific options
         BaseTransformer.add_model_specific_args(parser, root_dir)
+        parser.add_argument(
+            "--task_type",
+            default="NER",
+            type=str,
+            help="Task type to fine tune in training (e.g. NER, TOS, etc)"
+        )
         parser.add_argument(
             "--max_seq_length",
             default=128,
