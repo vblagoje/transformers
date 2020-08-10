@@ -67,7 +67,6 @@ class Split(Enum):
 
 
 class TokenClassificationTask:
-
     def read_examples_from_file(self, data_dir, mode: Union[Split, str]) -> List[InputExample]:
         raise NotImplementedError
 
@@ -75,22 +74,22 @@ class TokenClassificationTask:
         raise NotImplementedError
 
     def convert_examples_to_features(
-            self,
-            examples: List[InputExample],
-            label_list: List[str],
-            max_seq_length: int,
-            tokenizer: PreTrainedTokenizer,
-            cls_token_at_end=False,
-            cls_token="[CLS]",
-            cls_token_segment_id=1,
-            sep_token="[SEP]",
-            sep_token_extra=False,
-            pad_on_left=False,
-            pad_token=0,
-            pad_token_segment_id=0,
-            pad_token_label_id=-100,
-            sequence_a_segment_id=0,
-            mask_padding_with_zero=True,
+        self,
+        examples: List[InputExample],
+        label_list: List[str],
+        max_seq_length: int,
+        tokenizer: PreTrainedTokenizer,
+        cls_token_at_end=False,
+        cls_token="[CLS]",
+        cls_token_segment_id=1,
+        sep_token="[SEP]",
+        sep_token_extra=False,
+        pad_on_left=False,
+        pad_token=0,
+        pad_token_segment_id=0,
+        pad_token_label_id=-100,
+        sequence_a_segment_id=0,
+        mask_padding_with_zero=True,
     ) -> List[InputFeatures]:
         """ Loads a data file into a list of `InputFeatures`
             `cls_token_at_end` define the location of the CLS token:
@@ -201,6 +200,7 @@ class TokenClassificationTask:
                 )
             )
         return features
+
 
 if is_torch_available():
     import torch

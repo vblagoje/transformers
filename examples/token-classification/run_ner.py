@@ -14,13 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ Fine-tuning the library models for named entity recognition on CoNLL-2003. """
-import inspect
 import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Union, TextIO
 from importlib import import_module
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from seqeval.metrics import f1_score, precision_score, recall_score
@@ -36,7 +35,8 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
-from utils_ner import TokenClassificationDataset, TokenClassificationTask, Split
+from utils_ner import Split, TokenClassificationDataset, TokenClassificationTask
+
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def main():
             f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
         )
 
-    module = import_module('tasks')
+    module = import_module("tasks")
     try:
         token_classification_task_clazz = getattr(module, model_args.task_type)
         token_classification_task: TokenClassificationTask = token_classification_task_clazz()

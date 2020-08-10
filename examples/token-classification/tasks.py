@@ -1,15 +1,18 @@
 import logging
 import os
-from typing import Union, List, TextIO
-
+from typing import List, TextIO, Union
 from conllu import parse_incr
 
-from utils_ner import TokenClassificationTask, Split, InputExample
+from utils_ner import InputExample, Split, TokenClassificationTask
+
 
 logger = logging.getLogger(__name__)
 
 
 class NER(TokenClassificationTask):
+    def __init__(self, label_idx=-1):
+        # in NER datasets, the last column is usually reserved for NER label
+        self.label_idx = label_idx
 
     def read_examples_from_file(self, data_dir, mode: Union[Split, str]) -> List[InputExample]:
         if isinstance(mode, Split):
@@ -31,7 +34,7 @@ class NER(TokenClassificationTask):
                     splits = line.split(" ")
                     words.append(splits[0])
                     if len(splits) > 1:
-                        labels.append(splits[-1].replace("\n", ""))
+                        labels.append(splits[self.label_idx].replace("\n", ""))
                     else:
                         # Examples could have no label for mode = "test"
                         labels.append("O")
@@ -50,9 +53,7 @@ class NER(TokenClassificationTask):
                 output_line = line.split()[0] + " " + preds_list[example_id].pop(0) + "\n"
                 writer.write(output_line)
             else:
-                logger.warning(
-                    "Maximum sequence length exceeded: No prediction for '%s'.", line.split()[0]
-                )
+                logger.warning("Maximum sequence length exceeded: No prediction for '%s'.", line.split()[0])
 
     def get_labels(self, path: str) -> List[str]:
         if path:
@@ -65,8 +66,45 @@ class NER(TokenClassificationTask):
             return ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
 
 
-class POS(TokenClassificationTask):
+class Chunk(NER):
+    def __init__(self):
+        # in CONLL2003 dataset chunk column is second-to-last
+        super().__init__(label_idx=-2)
 
+    def get_labels(self, path: str) -> List[str]:
+        if path:
+            with open(path, "r") as f:
+                labels = f.read().splitlines()
+            if "O" not in labels:
+                labels = ["O"] + labels
+            return labels
+        else:
+            return [
+                "O",
+                "B-ADVP",
+                "B-INTJ",
+                "B-LST",
+                "B-PRT",
+                "B-NP",
+                "B-SBAR",
+                "B-VP",
+                "B-ADJP",
+                "B-CONJP",
+                "B-PP",
+                "I-ADVP",
+                "I-INTJ",
+                "I-LST",
+                "I-PRT",
+                "I-NP",
+                "I-SBAR",
+                "I-VP",
+                "I-ADJP",
+                "I-CONJP",
+                "I-PP",
+            ]
+
+
+class POS(TokenClassificationTask):
     def read_examples_from_file(self, data_dir, mode: Union[Split, str]) -> List[InputExample]:
         if isinstance(mode, Split):
             mode = mode.value
@@ -103,5 +141,22 @@ class POS(TokenClassificationTask):
             with open(path, "r") as f:
                 return f.read().splitlines()
         else:
-            return ["ADJ", "ADP", "ADV", "AUX", "CCONJ", "DET", "INTJ", "NOUN", "NUM", "PART", "PRON", "PROPN", "PUNCT",
-                    "SCONJ", "SYM", "VERB", "X"]
+            return [
+                "ADJ",
+                "ADP",
+                "ADV",
+                "AUX",
+                "CCONJ",
+                "DET",
+                "INTJ",
+                "NOUN",
+                "NUM",
+                "PART",
+                "PRON",
+                "PROPN",
+                "PUNCT",
+                "SCONJ",
+                "SYM",
+                "VERB",
+                "X",
+            ]

@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from lightning_base import BaseTransformer, add_generic_args, generic_train
 from utils_ner import TokenClassificationTask
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,7 +25,7 @@ class NERTransformer(BaseTransformer):
     mode = "token-classification"
 
     def __init__(self, hparams):
-        module = import_module('tasks')
+        module = import_module("tasks")
         try:
             token_classification_task_clazz = getattr(module, hparams.task_type)
             self.token_classification_task: TokenClassificationTask = token_classification_task_clazz()
@@ -35,7 +36,7 @@ class NERTransformer(BaseTransformer):
             )
         self.labels = self.token_classification_task.get_labels(hparams.labels)
         self.pad_token_label_id = CrossEntropyLoss().ignore_index
-        super().__init__(hparams,  len(self.labels), self.mode)
+        super().__init__(hparams, len(self.labels), self.mode)
 
     def forward(self, **inputs):
         return self.model(**inputs)
@@ -163,10 +164,7 @@ class NERTransformer(BaseTransformer):
         # Add NER specific options
         BaseTransformer.add_model_specific_args(parser, root_dir)
         parser.add_argument(
-            "--task_type",
-            default="NER",
-            type=str,
-            help="Task type to fine tune in training (e.g. NER, TOS, etc)"
+            "--task_type", default="NER", type=str, help="Task type to fine tune in training (e.g. NER, POS, etc)"
         )
         parser.add_argument(
             "--max_seq_length",
