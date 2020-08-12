@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 from importlib import import_module
+from argparse import Namespace
 
 import numpy as np
 import torch
@@ -25,6 +26,8 @@ class NERTransformer(BaseTransformer):
     mode = "token-classification"
 
     def __init__(self, hparams):
+        if type(hparams) == dict:
+            hparams = Namespace(**hparams)
         module = import_module("tasks")
         try:
             token_classification_task_clazz = getattr(module, hparams.task_type)
@@ -51,8 +54,8 @@ class NERTransformer(BaseTransformer):
 
         outputs = self(**inputs)
         loss = outputs[0]
-        tensorboard_logs = {"loss": loss, "rate": self.lr_scheduler.get_last_lr()[-1]}
-        return {"loss": loss, "log": tensorboard_logs}
+        #tensorboard_logs = {"loss": loss, "rate": self.lr_scheduler.get_last_lr()[-1]}
+        return {"loss": loss}
 
     def prepare_data(self):
         "Called to initialize data. Use the call to construct features"
@@ -83,7 +86,7 @@ class NERTransformer(BaseTransformer):
                 logger.info("Saving features into cached file %s", cached_features_file)
                 torch.save(features, cached_features_file)
 
-    def load_dataset(self, mode, batch_size):
+    def get_dataloader(self, mode: int, batch_size: int, shuffle: bool) -> DataLoader:
         "Load datasets. Called after prepare data."
         cached_features_file = self._feature_file(mode)
         logger.info("Loading features from cached file %s", cached_features_file)
