@@ -36,7 +36,7 @@ from transformers import (
     TextDataset,
     Trainer,
     TrainingArguments,
-    set_seed, BertConfig, AutoModelForMaskedLM,
+    set_seed, BertConfig, AutoModelForMaskedLM, BertTokenizerFast,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,10 +179,7 @@ def main():
                         intermediate_size=4*H)
     logger.warning("You are instantiating a new config instance from scratch.")
 
-    if model_args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, cache_dir=model_args.cache_dir)
-    else:
-        tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased', cache_dir=model_args.cache_dir)
+    tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
     logger.info("Training new model from scratch")
     model = AutoModelForMaskedLM.from_config(config)
