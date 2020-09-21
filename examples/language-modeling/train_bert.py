@@ -13,11 +13,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-Fine-tuning the library models for language modeling on a text file (GPT, GPT-2, CTRL, BERT, RoBERTa, XLNet).
-GPT, GPT-2 and CTRL are fine-tuned using a causal language modeling (CLM) loss. BERT and RoBERTa are fine-tuned
-using a masked language modeling (MLM) loss. XLNet is fine-tuned using a permutation language modeling (PLM) loss.
-"""
 
 import logging
 import math
@@ -27,8 +22,6 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 from transformers import (
-    MODEL_WITH_LM_HEAD_MAPPING,
-    AutoTokenizer,
     DataCollatorForLanguageModeling,
     HfArgumentParser,
     LineByLineTextDataset,
@@ -41,9 +34,6 @@ from transformers import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_CONFIG_CLASSES = list(MODEL_WITH_LM_HEAD_MAPPING.keys())
-MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
-
 
 @dataclass
 class ModelArguments:
@@ -53,13 +43,10 @@ class ModelArguments:
 
     model_name: Optional[str] = field(
         default="bert-tiny",
-        metadata={"help": "Model name"},
+        metadata={"help": "Model name [bert-tiny, bert-mini, bert-small, bert=medium, bert-base]"},
     )
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-    cache_dir: Optional[str] = field(
-        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
 
 
@@ -77,23 +64,24 @@ class DataTrainingArguments:
         metadata={"help": "An optional input evaluation data file to evaluate the perplexity on (a text file)."},
     )
     line_by_line: bool = field(
-        default=False,
+        default=True,
         metadata={"help": "Whether distinct lines of text in the dataset are to be handled as distinct sequences."},
     )
 
     mlm: bool = field(
-        default=False, metadata={"help": "Train with masked-language modeling loss instead of language modeling."}
+        default=True, metadata={"help": "Train with masked-language modeling loss instead of language modeling."}
     )
     mlm_probability: float = field(
         default=0.15, metadata={"help": "Ratio of tokens to mask for masked language modeling loss"}
     )
 
     block_size: int = field(
-        default=-1,
+        default=512,
         metadata={
             "help": "Optional input sequence length after tokenization."
                     "The training dataset will be truncated in block of this size for training."
-                    "Default to the model max input length for single sentence inputs (take into account special tokens)."
+                    "Default to the model max input length for single sentence inputs (take into "
+                    "account special tokens)."
         },
     )
     overwrite_cache: bool = field(
@@ -104,8 +92,7 @@ class DataTrainingArguments:
 def get_dataset(
         args: DataTrainingArguments,
         tokenizer: PreTrainedTokenizer,
-        evaluate: bool = False,
-        cache_dir: Optional[str] = None,
+        evaluate: bool = False
 ):
     file_path = args.eval_data_file if evaluate else args.train_data_file
     if args.line_by_line:
@@ -115,8 +102,7 @@ def get_dataset(
             tokenizer=tokenizer,
             file_path=file_path,
             block_size=args.block_size,
-            overwrite_cache=args.overwrite_cache,
-            cache_dir=cache_dir,
+            overwrite_cache=args.overwrite_cache
         )
 
 
@@ -141,7 +127,8 @@ def main():
             and not training_args.overwrite_output_dir
     ):
         raise ValueError(
-            f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
+            f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+            f"Use --overwrite_output_dir to overcome."
         )
 
     # Setup logging
@@ -164,16 +151,35 @@ def main():
     set_seed(training_args.seed)
 
     # Create model config and tokenizer
-    H = 128
-    L = 2
-    config = BertConfig(hidden_size=H, num_attention_heads=int(H/64), num_hidden_layers=L,
-                        intermediate_size=4*H)
-    logger.info("You are instantiating a new config instance from scratch.")
 
+    # Let's define only the main models using L/H tuples
+    # <p>BERT Miniatures is the set of 24 BERT models referenced in
+    # <a href="https://arxiv.org/abs/1908.08962">Well-Read Students Learn Better: On the Importance of
+    # Pre-training Compact Models</a> (English only, uncased, trained with WordPiece masking).</p>
+    #
+    # The L and H in the table below stand for the numbers of transformer layers (L) and hidden
+    # embedding sizes (H). The numberof self-attention heads is set to H/64 and the feed-forward/filter
+    # size to 4*H.
+
+    bert_configs = {"bert-tiny": (2, 128), "bert-mini": (4, 256), "bert-small": (4, 512), "bert-medium": (8, 512),
+                    "bert-base": (12, 768)}
+
+    # and select the model to train
+    L = bert_configs[model_args.model_name][0]
+    H = bert_configs[model_args.model_name][1]
+    config = BertConfig(hidden_size=H, num_attention_heads=int(H / 64), num_hidden_layers=L,
+                        intermediate_size=4 * H)
+
+    logger.info("You are instantiating a new config instance from scratch %s", config)
+
+    # use uncased tokenizer for bert
     tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
+    # MLM model
     model = AutoModelForMaskedLM.from_config(config)
-    logger.info("Training new model from scratch. It has % 2d parameters", model.num_parameters())
+
+    logger.info("Training new model from scratch. It has %d parameters", model.num_parameters())
+
     logger.info(model)
     if data_args.block_size <= 0:
         data_args.block_size = tokenizer.model_max_length
@@ -184,10 +190,10 @@ def main():
     # Get datasets
 
     train_dataset = (
-        get_dataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if training_args.do_train else None
+        get_dataset(data_args, tokenizer=tokenizer) if training_args.do_train else None
     )
     eval_dataset = (
-        get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir)
+        get_dataset(data_args, tokenizer=tokenizer, evaluate=True)
         if training_args.do_eval
         else None
     )
@@ -213,7 +219,7 @@ def main():
             else None
         )
         trainer.train(model_path=model_args.model_name)
-        trainer.save_model(model_path.model_name)
+        trainer.save_model(output_dir=model_args.model_name)
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
         if trainer.is_world_master():
