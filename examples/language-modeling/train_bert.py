@@ -51,9 +51,9 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune, or train from scratch.
     """
 
-    model_type: Optional[str] = field(
-        default=None,
-        metadata={"help": "If training from scratch, pass a model type from the list: " + ", ".join(MODEL_TYPES)},
+    model_name: Optional[str] = field(
+        default="bert-tiny",
+        metadata={"help": "Model name"},
     )
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
@@ -208,12 +208,12 @@ def main():
     # Training
     if training_args.do_train:
         model_path = (
-            model_args.model_name_or_path
-            if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
+            model_args.model_name
+            if model_args.model_name is not None and os.path.isdir(model_args.model_name)
             else None
         )
-        trainer.train(model_path=model_path)
-        trainer.save_model()
+        trainer.train(model_path=model_args.model_name)
+        trainer.save_model(model_path.model_name)
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
         if trainer.is_world_master():
