@@ -87,15 +87,6 @@ class DataTrainingArguments:
     mlm_probability: float = field(
         default=0.15, metadata={"help": "Ratio of tokens to mask for masked language modeling loss"}
     )
-    plm_probability: float = field(
-        default=1 / 6,
-        metadata={
-            "help": "Ratio of length of a span of masked tokens to surrounding context length for permutation language modeling."
-        },
-    )
-    max_span_length: int = field(
-        default=5, metadata={"help": "Maximum length of a span of masked tokens for permutation language modeling."}
-    )
 
     block_size: int = field(
         default=-1,
@@ -177,15 +168,13 @@ def main():
     L = 2
     config = BertConfig(hidden_size=H, num_attention_heads=int(H/64), num_hidden_layers=L,
                         intermediate_size=4*H)
-    logger.warning("You are instantiating a new config instance from scratch.")
+    logger.info("You are instantiating a new config instance from scratch.")
 
     tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
-    logger.info("Training new model from scratch")
     model = AutoModelForMaskedLM.from_config(config)
-
-    model.resize_token_embeddings(len(tokenizer))
-
+    logger.info("Training new model from scratch. It has % 2d parameters", model.num_parameters())
+    logger.info(model)
     if data_args.block_size <= 0:
         data_args.block_size = tokenizer.model_max_length
         # Our input block size will be the max possible for the model
@@ -204,7 +193,7 @@ def main():
     )
 
     data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm=data_args.mlm, mlm_probability=data_args.mlm_probability
+        tokenizer=tokenizer, mlm=True, mlm_probability=data_args.mlm_probability
     )
 
     # Initialize our Trainer
@@ -213,7 +202,6 @@ def main():
         args=training_args,
         data_collator=data_collator,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
         prediction_loss_only=True,
     )
 
