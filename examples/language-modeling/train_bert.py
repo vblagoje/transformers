@@ -29,7 +29,7 @@ from transformers import (
     TextDataset,
     Trainer,
     TrainingArguments,
-    set_seed, BertConfig, AutoModelForMaskedLM, BertTokenizerFast,
+    set_seed, BertConfig, AutoModelForMaskedLM, BertTokenizerFast, BertForPreTraining,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,6 @@ class DataTrainingArguments:
                     "Default to the model max input length for single sentence inputs (take into "
                     "account special tokens)."
         },
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
 
 
@@ -150,8 +147,6 @@ def main():
     # Set seed
     set_seed(training_args.seed)
 
-    # Create model config and tokenizer
-
     # Let's define only the main models using L/H tuples
     # <p>BERT Miniatures is the set of 24 BERT models referenced in
     # <a href="https://arxiv.org/abs/1908.08962">Well-Read Students Learn Better: On the Importance of
@@ -160,8 +155,10 @@ def main():
     # The L and H in the table below stand for the numbers of transformer layers (L) and hidden
     # embedding sizes (H). The numberof self-attention heads is set to H/64 and the feed-forward/filter
     # size to 4*H.
-
-    bert_configs = {"bert-tiny": (2, 128), "bert-mini": (4, 256), "bert-small": (4, 512), "bert-medium": (8, 512),
+    bert_configs = {"bert-tiny": (2, 128),
+                    "bert-mini": (4, 256),
+                    "bert-small": (4, 512),
+                    "bert-medium": (8, 512),
                     "bert-base": (12, 768)}
 
     # and select the model to train
@@ -170,46 +167,30 @@ def main():
     config = BertConfig(hidden_size=H, num_attention_heads=int(H / 64), num_hidden_layers=L,
                         intermediate_size=4 * H)
 
-    logger.info("You are instantiating a new config instance from scratch %s", config)
+    logger.info("You are instantiating a new config instance %s", config)
 
     # use uncased tokenizer for bert
     tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
     # MLM model
-    model = AutoModelForMaskedLM.from_config(config)
+    model = BertForPreTraining(config)
 
     logger.info("Training new model from scratch. It has %d parameters", model.num_parameters())
 
     logger.info(model)
-    if data_args.block_size <= 0:
-        data_args.block_size = tokenizer.model_max_length
-        # Our input block size will be the max possible for the model
-    else:
-        data_args.block_size = min(data_args.block_size, tokenizer.model_max_length)
+
+    data_args.block_size = min(data_args.block_size, tokenizer.model_max_length)
 
     # Get datasets
+    train_dataset = get_dataset(data_args, tokenizer=tokenizer) if training_args.do_train else None
+    eval_dataset = get_dataset(data_args, tokenizer=tokenizer, evaluate=True) if training_args.do_eval else None
 
-    train_dataset = (
-        get_dataset(data_args, tokenizer=tokenizer) if training_args.do_train else None
-    )
-    eval_dataset = (
-        get_dataset(data_args, tokenizer=tokenizer, evaluate=True)
-        if training_args.do_eval
-        else None
-    )
-
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm=True, mlm_probability=data_args.mlm_probability
-    )
+    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True,
+                                                    mlm_probability=data_args.mlm_probability)
 
     # Initialize our Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        data_collator=data_collator,
-        train_dataset=train_dataset,
-        prediction_loss_only=True,
-    )
+    trainer = Trainer(model=model, args=training_args, data_collator=data_collator,
+                      train_dataset=train_dataset, eval_dataset=eval_dataset, prediction_loss_only=True)
 
     # Training
     if training_args.do_train:
@@ -219,7 +200,7 @@ def main():
             else None
         )
         trainer.train(model_path=model_args.model_name)
-        trainer.save_model(output_dir=model_args.model_name)
+        trainer.save_model()
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
         if trainer.is_world_master():
