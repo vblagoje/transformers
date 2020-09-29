@@ -22,6 +22,7 @@ from typing import Optional
 import datasets
 import nltk
 from dataclasses import dataclass, field
+from datasets import load_dataset
 from torch.utils.data import Dataset
 
 from transformers import (
@@ -128,7 +129,9 @@ def get_dataset(
     if args.line_by_line:
         return LineByLineTextDataset(tokenizer=tokenizer, file_path=file_path, block_size=args.block_size)
     else:
-        return WikipediaDatasetForNextSentencePrediction(tokenizer=tokenizer, dataset=dataset)
+        logger.info("Preparing wikipedia dataset, this will take a while for the first download...")
+        wikipedia_dataset = load_dataset('wikipedia', "20200501.en", split='train')
+        return WikipediaDatasetForNextSentencePrediction(tokenizer=tokenizer, dataset=wikipedia_dataset)
 
 
 def main():
