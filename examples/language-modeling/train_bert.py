@@ -49,7 +49,7 @@ class WikipediaDatasetForNextSentencePrediction(Dataset):
             block_size: int = 512,
             article_column: str = "text"
     ):
-        self.block_size = block_size - tokenizer.num_special_tokens_to_add(pair=False)
+        self.block_size = block_size
         self.text_column = article_column
         self.tokenizer = tokenizer
         self.dataset = dataset
@@ -122,7 +122,6 @@ class DataTrainingArguments:
 def get_dataset(
         args: DataTrainingArguments,
         tokenizer: PreTrainedTokenizer,
-        dataset: datasets.Dataset,
         evaluate: bool = False
 ):
     file_path = args.eval_data_file if evaluate else args.train_data_file
