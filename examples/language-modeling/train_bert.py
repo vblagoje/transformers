@@ -19,7 +19,10 @@ import math
 import os
 from typing import Optional
 
+import datasets
+import nltk
 from dataclasses import dataclass, field
+from torch.utils.data import Dataset
 
 from transformers import (
     DataCollatorForLanguageModeling,
@@ -29,10 +32,39 @@ from transformers import (
     TextDataset,
     Trainer,
     TrainingArguments,
-    set_seed, BertConfig, AutoModelForMaskedLM, BertTokenizerFast, BertForPreTraining,
+    set_seed, BertConfig, BertTokenizerFast, AutoModelWithLMHead,
 )
 
 logger = logging.getLogger(__name__)
+nltk.download('punkt')
+
+
+class WikipediaDatasetForNextSentencePrediction(Dataset):
+
+    def __init__(
+            self,
+            tokenizer: PreTrainedTokenizer,
+            dataset: datasets.Dataset,
+            block_size: int = 512,
+            article_column: str = "text"
+    ):
+        self.block_size = block_size - tokenizer.num_special_tokens_to_add(pair=False)
+        self.text_column = article_column
+        self.tokenizer = tokenizer
+        self.dataset = dataset
+
+    def tokenize_article(self, index):
+        article_text = self.dataset[index][self.text_column]
+        article_sentences = nltk.sent_tokenize(article_text)
+        batch_encoding = self.tokenizer(article_sentences, add_special_tokens=True,
+                                        truncation=True, max_length=self.block_size)
+        return batch_encoding["input_ids"]
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, i):
+        return self.tokenize_article(i)
 
 
 @dataclass
@@ -64,7 +96,7 @@ class DataTrainingArguments:
         metadata={"help": "An optional input evaluation data file to evaluate the perplexity on (a text file)."},
     )
     line_by_line: bool = field(
-        default=True,
+        default=False,
         metadata={"help": "Whether distinct lines of text in the dataset are to be handled as distinct sequences."},
     )
 
@@ -89,18 +121,14 @@ class DataTrainingArguments:
 def get_dataset(
         args: DataTrainingArguments,
         tokenizer: PreTrainedTokenizer,
+        dataset: datasets.Dataset,
         evaluate: bool = False
 ):
     file_path = args.eval_data_file if evaluate else args.train_data_file
     if args.line_by_line:
         return LineByLineTextDataset(tokenizer=tokenizer, file_path=file_path, block_size=args.block_size)
     else:
-        return TextDataset(
-            tokenizer=tokenizer,
-            file_path=file_path,
-            block_size=args.block_size,
-            overwrite_cache=args.overwrite_cache
-        )
+        return WikipediaDatasetForNextSentencePrediction(tokenizer=tokenizer, dataset=dataset)
 
 
 def main():
@@ -153,7 +181,7 @@ def main():
     # Pre-training Compact Models</a> (English only, uncased, trained with WordPiece masking).</p>
     #
     # The L and H in the table below stand for the numbers of transformer layers (L) and hidden
-    # embedding sizes (H). The numberof self-attention heads is set to H/64 and the feed-forward/filter
+    # embedding sizes (H). The number of self-attention heads is set to H/64 and the feed-forward/filter
     # size to 4*H.
     bert_configs = {"bert-tiny": (2, 128),
                     "bert-mini": (4, 256),
@@ -173,10 +201,10 @@ def main():
     tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
     # MLM model
-    model = BertForPreTraining(config)
+    #model = BertForPreTraining(config)
+    model = AutoModelWithLMHead.from_config(config)
 
     logger.info("Training new model from scratch. It has %d parameters", model.num_parameters())
-
     logger.info(model)
 
     data_args.block_size = min(data_args.block_size, tokenizer.model_max_length)
