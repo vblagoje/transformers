@@ -429,6 +429,10 @@ def main():
                 logger.error(
                     f"Could not find checkpoint in {training_args.output_dir}, aborting second part of training!")
 
+        trainer.save_model()
+        if trainer.is_world_master():
+            tokenizer.save_pretrained(training_args.output_dir)
+
 
 def prepare_training_args(first_phase_training_args: TrainingArguments, second_phase_training_args: TrainingArguments):
     second_phase_training_args.warmup_steps = int(second_phase_training_args.max_steps_phase2 *
