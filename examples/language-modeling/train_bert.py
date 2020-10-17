@@ -427,7 +427,7 @@ def main():
                     f"Could not find checkpoint in {training_args.output_dir}, aborting second part of training!")
 
         trainer.save_model()
-        if trainer.is_world_master():
+        if trainer.is_world_process_zero():
             tokenizer.save_pretrained(training_args.output_dir)
 
 
