@@ -407,24 +407,21 @@ def main():
         if training_args.do_phase2_training:
             checkpoint_dir = find_checkpoint(training_args)
             if checkpoint_dir:
-                if training_args.do_phase1_training:
-                    trainer.args = prepare_training_args(first_phase_training_args, second_phase_training_args)
-                    trainer.train_dataset = DatasetAdapter(second_bert_training_dataset)
-                    trainer.data_collator = DataCollatorForNextSentencePrediction(tokenizer=tokenizer, block_size=512)
-                else:
+                if not training_args.do_phase1_training:
                     logger.info(f"Training phase 2 continues from checkpoint {checkpoint_dir}, please wait...")
                     model = model.from_pretrained(checkpoint_dir)
                     model.train()
                     logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint")
-                    trainer = Trainer(model=model,
-                                      args=prepare_training_args(first_phase_training_args, second_phase_training_args),
-                                      data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
-                                                                                          block_size=512),
-                                      train_dataset=DatasetAdapter(second_bert_training_dataset),
-                                      prediction_loss_only=True)
+
+                trainer = Trainer(model=model,
+                                  args=prepare_training_args(copy(training_args), second_phase_training_args),
+                                  data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
+                                                                                      block_size=512),
+                                  train_dataset=DatasetAdapter(second_bert_training_dataset),
+                                  prediction_loss_only=True)
 
                 logger.info(f"Starting phase 2, parameters {trainer.args}")
-                trainer.train(model_path=checkpoint_dir)
+                trainer.train()
             else:
                 logger.error(
                     f"Could not find checkpoint in {training_args.output_dir}, aborting second part of training!")
@@ -434,14 +431,14 @@ def main():
             tokenizer.save_pretrained(training_args.output_dir)
 
 
-def prepare_training_args(first_phase_training_args: TrainingArguments, second_phase_training_args: TrainingArguments):
-    second_phase_training_args.warmup_steps = int(second_phase_training_args.max_steps_phase2 *
-                                                  second_phase_training_args.warmup_proportion_phase2)
-    second_phase_training_args.learning_rate = second_phase_training_args.learning_rate_phase2
-    second_phase_training_args.max_steps = first_phase_training_args.max_steps + second_phase_training_args.max_steps_phase2
-    second_phase_training_args.gradient_accumulation_steps = second_phase_training_args.gradient_accumulation_steps_phase2
-    second_phase_training_args.per_device_train_batch_size = second_phase_training_args.per_device_train_batch_size_phase2
-    return second_phase_training_args
+def prepare_training_args(training_args: TrainingArguments, second_phase_training_args: TrainingArguments):
+    training_args.warmup_steps = int(second_phase_training_args.max_steps_phase2 *
+                                     second_phase_training_args.warmup_proportion_phase2)
+    training_args.learning_rate = second_phase_training_args.learning_rate_phase2
+    training_args.max_steps = second_phase_training_args.max_steps_phase2
+    training_args.gradient_accumulation_steps = second_phase_training_args.gradient_accumulation_steps_phase2
+    training_args.per_device_train_batch_size = second_phase_training_args.per_device_train_batch_size_phase2
+    return training_args
 
 
 def _mp_fn(index):
