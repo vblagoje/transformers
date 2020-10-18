@@ -403,7 +403,7 @@ def main():
                               train_dataset=DatasetAdapter(first_bert_training_dataset), prediction_loss_only=True)
             # checkpoint_dir is ignored if None
             trainer.train(model_path=checkpoint_dir)
-            TrainerState.save_to_json(json_path=os.path.join(training_args.output_dir, "trainer_state.json"))
+            trainer.state.save_to_json(json_path=os.path.join(training_args.output_dir, "trainer_state.json"))
 
         if training_args.do_phase2_training:
             checkpoint_dir = find_checkpoint(training_args)
