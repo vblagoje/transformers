@@ -32,7 +32,7 @@ from transformers import (
     PreTrainedTokenizer,
     Trainer,
     TrainingArguments,
-    set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction,
+    set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerState,
 )
 
 nltk.download('punkt')
@@ -401,30 +401,29 @@ def main():
             trainer = Trainer(model=model, args=first_phase_training_args,
                               data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer, block_size=128),
                               train_dataset=DatasetAdapter(first_bert_training_dataset), prediction_loss_only=True)
-
+            # checkpoint_dir is ignored if None
             trainer.train(model_path=checkpoint_dir)
+            TrainerState.save_to_json(json_path=os.path.join(training_args.output_dir, "trainer_state.json"))
 
         if training_args.do_phase2_training:
             checkpoint_dir = find_checkpoint(training_args)
-            if checkpoint_dir:
-                if not training_args.do_phase1_training:
-                    logger.info(f"Training phase 2 continues from checkpoint {checkpoint_dir}, please wait...")
-                    model = model.from_pretrained(checkpoint_dir)
-                    model.train()
-                    logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint")
+            if checkpoint_dir and not training_args.do_phase1_training:
+                logger.info(f"Training phase 2 continues from checkpoint {checkpoint_dir}, please wait...")
+                model = model.from_pretrained(checkpoint_dir)
+                model.train()
+                logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint")
 
-                trainer = Trainer(model=model,
-                                  args=prepare_training_args(copy(training_args), second_phase_training_args),
-                                  data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
-                                                                                      block_size=512),
-                                  train_dataset=DatasetAdapter(second_bert_training_dataset),
-                                  prediction_loss_only=True)
+            trainer = Trainer(model=model,
+                              args=prepare_training_args(copy(training_args), second_phase_training_args),
+                              data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
+                                                                                  block_size=512),
+                              train_dataset=DatasetAdapter(second_bert_training_dataset),
+                              prediction_loss_only=True)
 
-                logger.info(f"Starting phase 2, parameters {trainer.args}")
-                trainer.train()
-            else:
-                logger.error(
-                    f"Could not find checkpoint in {training_args.output_dir}, aborting second part of training!")
+            trainer_state = TrainerState.load_from_json(json_path=os.path.join(training_args.output_dir,
+                                                                               "trainer_state.json"))
+            logger.info(f"Starting phase 2, parameters {trainer.args}, global step is {trainer_state.global_step}")
+            trainer.train(model_path=training_args.output_dir if trainer_state else None)
 
         trainer.save_model()
         if trainer.is_world_process_zero():
@@ -435,9 +434,10 @@ def prepare_training_args(training_args: TrainingArguments, second_phase_trainin
     training_args.warmup_steps = int(second_phase_training_args.max_steps_phase2 *
                                      second_phase_training_args.warmup_proportion_phase2)
     training_args.learning_rate = second_phase_training_args.learning_rate_phase2
-    training_args.max_steps = second_phase_training_args.max_steps_phase2
+    training_args.max_steps += second_phase_training_args.max_steps_phase2
     training_args.gradient_accumulation_steps = second_phase_training_args.gradient_accumulation_steps_phase2
     training_args.per_device_train_batch_size = second_phase_training_args.per_device_train_batch_size_phase2
+    training_args.run_name = training_args.run_name + "_2_phase"
     return training_args
 
 
