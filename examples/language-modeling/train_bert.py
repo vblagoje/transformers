@@ -400,7 +400,7 @@ def main():
 
             trainer = Trainer(model=model, args=first_phase_training_args,
                               data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer, block_size=128),
-                              train_dataset=DatasetAdapter(first_bert_training_dataset), prediction_loss_only=True)
+                              train_dataset=DatasetAdapter(first_bert_training_dataset))
             # checkpoint_dir is ignored if None
             trainer.train(model_path=checkpoint_dir)
             trainer.state.save_to_json(json_path=os.path.join(training_args.output_dir, "trainer_state.json"))
@@ -417,8 +417,7 @@ def main():
                               args=prepare_training_args(copy(training_args), second_phase_training_args),
                               data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
                                                                                   block_size=512),
-                              train_dataset=DatasetAdapter(second_bert_training_dataset),
-                              prediction_loss_only=True)
+                              train_dataset=DatasetAdapter(second_bert_training_dataset))
 
             trainer_state = TrainerState.load_from_json(json_path=os.path.join(training_args.output_dir,
                                                                                "trainer_state.json"))
