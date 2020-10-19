@@ -418,6 +418,8 @@ def main():
                               data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
                                                                                   block_size=512),
                               train_dataset=DatasetAdapter(second_bert_training_dataset))
+            # adjust optimizer/scheduler for second phase
+            trainer.create_optimizer_and_scheduler(num_training_steps=second_phase_training_args.max_steps_phase2)
 
             trainer_state = TrainerState.load_from_json(json_path=os.path.join(training_args.output_dir,
                                                                                "trainer_state.json"))
