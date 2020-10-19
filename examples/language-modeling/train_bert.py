@@ -18,13 +18,15 @@ import logging
 import os
 import random
 from copy import copy
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable, Tuple, Union
 
 import datasets
 import nltk
+import torch
 from dataclasses import dataclass, field
 from datasets import load_dataset, load_from_disk
 from pytorch_block_sparse import BlockSparseModelPatcher
+from pytorch_lamb import Lamb
 from torch.utils.data.dataset import Dataset
 
 from transformers import (
@@ -33,6 +35,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
     set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerState,
+    TrainerCallback, EvalPrediction, PreTrainedModel, DataCollator, get_polynomial_decay_schedule_with_warmup,
 )
 
 nltk.download('punkt')
@@ -50,6 +53,48 @@ class DatasetAdapter(Dataset):
 
     def __getitem__(self, i):
         return self.dataset[i]
+
+
+class BertTrainer(Trainer):
+    def __init__(
+            self,
+            model: Union[PreTrainedModel, torch.nn.Module] = None,
+            args: TrainingArguments = None,
+            data_collator: Optional[DataCollator] = None,
+            train_dataset: Optional[Dataset] = None,
+            eval_dataset: Optional[Dataset] = None,
+            tokenizer: Optional["PreTrainedTokenizerBase"] = None,
+            model_init: Callable[[], PreTrainedModel] = None,
+            compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
+            callbacks: Optional[List[TrainerCallback]] = None,
+            optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
+            **kwargs,
+    ):
+        super(BertTrainer, self).__init__(model, args, data_collator, train_dataset,
+                                          eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers,
+                                          **kwargs)
+
+    def create_optimizer_and_scheduler(self, num_training_steps: int):
+        """
+        Setup the optimizer and the learning rate scheduler.
+
+        We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
+        Trainer's init through :obj:`optimizers`, or subclass and override this method in a subclass.
+        """
+        if self.optimizer is None:
+            param_optimizer = list(self.model.named_parameters())
+            no_decay = ['bias', 'gamma', 'beta', 'LayerNorm.weight']
+
+            optimizer_grouped_parameters = [
+                {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)],
+                 'weight_decay': 0.01},
+                {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}]
+
+        self.optimizer = Lamb(optimizer_grouped_parameters, lr=self.args.learning_rate)
+        if self.lr_scheduler is None:
+            self.lr_scheduler = get_polynomial_decay_schedule_with_warmup(self.optimizer,
+                                                                          num_warmup_steps=self.args.warmup_steps,
+                                                                          num_training_steps=num_training_steps)
 
 
 class AndBNextSentencePredictionProcessor(object):
@@ -398,9 +443,10 @@ def main():
             else:
                 logger.info(f"Training starts from scratch")
 
-            trainer = Trainer(model=model, args=first_phase_training_args,
-                              data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer, block_size=128),
-                              train_dataset=DatasetAdapter(first_bert_training_dataset))
+            trainer = BertTrainer(model=model, args=first_phase_training_args,
+                                  data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
+                                                                                      block_size=128),
+                                  train_dataset=DatasetAdapter(first_bert_training_dataset))
             # checkpoint_dir is ignored if None
             trainer.train(model_path=checkpoint_dir)
             trainer.state.save_to_json(json_path=os.path.join(training_args.output_dir, "trainer_state.json"))
@@ -413,11 +459,11 @@ def main():
                 model.train()
                 logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint")
 
-            trainer = Trainer(model=model,
-                              args=prepare_training_args(copy(training_args), second_phase_training_args),
-                              data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
-                                                                                  block_size=512),
-                              train_dataset=DatasetAdapter(second_bert_training_dataset))
+            trainer = BertTrainer(model=model,
+                                  args=prepare_training_args(copy(training_args), second_phase_training_args),
+                                  data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
+                                                                                      block_size=512),
+                                  train_dataset=DatasetAdapter(second_bert_training_dataset))
             # adjust optimizer/scheduler for second phase
             trainer.create_optimizer_and_scheduler(num_training_steps=second_phase_training_args.max_steps_phase2)
 
