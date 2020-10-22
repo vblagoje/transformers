@@ -288,7 +288,7 @@ def main():
         logger.info(f"Model sparsified from {num_parameters} parameters, now has {model.num_parameters()} parameters")
 
     logger.info("Preparing bert training dataset...")
-    dataset = load_from_disk(training_args.encoded_bert_dataset_path)
+    dataset = load_from_disk(data_args.encoded_bert_dataset_path)
     logger.info(f"Using dataset of {len(dataset)} samples")
 
     # never mind the name, we are just splitting bert dataset into two parts
