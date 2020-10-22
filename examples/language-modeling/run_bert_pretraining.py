@@ -16,22 +16,20 @@
 import glob
 import logging
 import os
-import random
 from copy import copy
-from typing import Dict, List, Optional, Any, Callable, Tuple, Union
+from typing import Dict, List, Optional, Callable, Tuple, Union
 
 import datasets
 import nltk
 import torch
 from dataclasses import dataclass, field
-from datasets import load_dataset, load_from_disk
+from datasets import load_from_disk
 from pytorch_block_sparse import BlockSparseModelPatcher
 from pytorch_lamb import Lamb
 from torch.utils.data.dataset import Dataset
 
 from transformers import (
     HfArgumentParser,
-    PreTrainedTokenizer,
     Trainer,
     TrainingArguments,
     set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerState,
@@ -95,128 +93,6 @@ class BertTrainer(Trainer):
             self.lr_scheduler = get_polynomial_decay_schedule_with_warmup(self.optimizer,
                                                                           num_warmup_steps=self.args.warmup_steps,
                                                                           num_training_steps=num_training_steps)
-
-
-class AndBNextSentencePredictionProcessor(object):
-
-    def __init__(
-            self,
-            tokenizer: PreTrainedTokenizer,
-            block_size: int = 128,
-            short_seq_probability=0.1,
-            nsp_probability=0.5,
-            text_column: str = "text"
-    ):
-        self.tokenizer = tokenizer
-        self.block_size = block_size - tokenizer.num_special_tokens_to_add(pair=True)
-        self.short_seq_probability = short_seq_probability
-        self.nsp_probability = nsp_probability
-        self.text_column: str = text_column
-
-    def __call__(self, documents: List[str]) -> Dict[str, Any]:
-        examples_a_all, examples_b_all, examples_is_random_next_all = [], [], []
-        encoded_docs = []
-        for document in documents[self.text_column]:
-            encoded_doc = self.encode_document(document)
-            encoded_docs.append(encoded_doc)
-
-        for idx, doc in enumerate(encoded_docs):
-            examples_a, examples_b, examples_is_random_next = self.create_examples_from_document(encoded_docs, doc, idx)
-            examples_a_all.extend(examples_a)
-            examples_b_all.extend(examples_b)
-            examples_is_random_next_all.extend(examples_is_random_next)
-
-        return {"is_random_next": examples_is_random_next_all,
-                "tokens_a": examples_a_all,
-                "tokens_b": examples_b_all}
-
-    def encode_document(self, text: str) -> List[List[int]]:
-        sentences = nltk.sent_tokenize(text)
-        batch_encoding = self.tokenizer.batch_encode_plus(sentences, add_special_tokens=False,
-                                                          truncation=True, max_length=self.block_size)
-        return batch_encoding["input_ids"]
-
-    def create_examples_from_document(self, documents: List[List[List[int]]],
-                                      document: List[List[int]], doc_idx: int):
-
-        """Creates examples for a single document."""
-        max_num_tokens = self.block_size - self.tokenizer.num_special_tokens_to_add(pair=True)
-
-        # We *usually* want to fill up the entire sequence since we are padding
-        # to `block_size` anyways, so short sequences are generally wasted
-        # computation. However, we *sometimes*
-        # (i.e., short_seq_prob == 0.1 == 10% of the time) want to use shorter
-        # sequences to minimize the mismatch between pre-training and fine-tuning.
-        # The `target_seq_length` is just a rough target however, whereas
-        # `block_size` is a hard limit.
-        target_seq_length = max_num_tokens
-        if random.random() < self.short_seq_probability:
-            target_seq_length = random.randint(2, max_num_tokens)
-
-        current_chunk = []  # a buffer stored current working segments
-        current_length = 0
-        i = 0
-
-        examples_a, examples_b, examples_is_random_next = [], [], []
-        while i < len(document):
-            segment = document[i]
-            current_chunk.append(segment)
-            current_length += len(segment)
-            if i == len(document) - 1 or current_length >= target_seq_length:
-                if current_chunk:
-                    # `a_end` is how many segments from `current_chunk` go into the `A`
-                    # (first) sentence.
-                    a_end = 1
-                    if len(current_chunk) >= 2:
-                        a_end = random.randint(1, len(current_chunk) - 1)
-
-                    tokens_a = []
-                    for j in range(a_end):
-                        tokens_a.extend(current_chunk[j])
-
-                    tokens_b = []
-
-                    if len(current_chunk) == 1 or random.random() < self.nsp_probability:
-                        is_random_next = True
-                        target_b_length = target_seq_length - len(tokens_a)
-
-                        # This should rarely go for more than one iteration for large
-                        # corpora. However, just to be careful, we try to make sure that
-                        # the random document is not the same as the document
-                        # we're processing.
-                        for _ in range(10):
-                            random_document_index = random.randint(0, len(documents) - 1)
-                            if random_document_index != doc_idx:
-                                break
-
-                        random_document = documents[random_document_index]
-                        random_start = random.randint(0, len(random_document) - 1)
-                        for j in range(random_start, len(random_document)):
-                            tokens_b.extend(random_document[j])
-                            if len(tokens_b) >= target_b_length:
-                                break
-                        # We didn't actually use these segments so we "put them back" so
-                        # they don't go to waste.
-                        num_unused_segments = len(current_chunk) - a_end
-                        i -= num_unused_segments
-                    # Actual next
-                    else:
-                        is_random_next = False
-                        for j in range(a_end, len(current_chunk)):
-                            tokens_b.extend(current_chunk[j])
-
-                    assert len(tokens_a) >= 1
-                    assert len(tokens_b) >= 1
-
-                    examples_a.append(tokens_a)
-                    examples_b.append(tokens_b)
-                    examples_is_random_next.append(is_random_next)
-
-                current_chunk = []
-                current_length = 0
-
-            i += 1
-        return examples_a, examples_b, examples_is_random_next
 
 
 @dataclass
@@ -325,18 +201,15 @@ def find_checkpoint(args: TrainingArguments):
     return checkpoint_dir
 
 
-def prepare_bert_dataset(tokenizer: PreTrainedTokenizer, args: DataTrainingArguments):
-    try:
-        encoded_bert_dataset = load_from_disk(args.encoded_bert_dataset_path)
-        logger.info(f"Using dataset of {len(encoded_bert_dataset)} samples")
-    except FileNotFoundError:
-        logger.info(f"Encoded bert dataset not found on path {args.encoded_bert_dataset_path}")
-        bert_dataset = load_dataset('wikipedia', "20200501.en", split='train')
-        nsp = AndBNextSentencePredictionProcessor(tokenizer=tokenizer)
-        logger.info(f"Encoding bert dataset containing {len(bert_dataset)} articles")
-        encoded_bert_dataset = bert_dataset.map(nsp, batched=True, remove_columns=bert_dataset.column_names)
-
-    return encoded_bert_dataset
+def prepare_training_args(training_args: TrainingArguments, second_phase_training_args: BertTrainingArguments):
+    training_args.warmup_steps = int(second_phase_training_args.max_steps_phase2 *
+                                     second_phase_training_args.warmup_proportion_phase2)
+    training_args.learning_rate = second_phase_training_args.learning_rate_phase2
+    training_args.max_steps += second_phase_training_args.max_steps_phase2
+    training_args.gradient_accumulation_steps = second_phase_training_args.gradient_accumulation_steps_phase2
+    training_args.per_device_train_batch_size = second_phase_training_args.per_device_train_batch_size_phase2
+    training_args.run_name = training_args.run_name + "_2_phase"
+    return training_args
 
 
 def main():
@@ -406,15 +279,17 @@ def main():
     model = BertForPreTraining(config)
 
     if model_args.sparse_model:
+        num_parameters = model.num_parameters()
         model = model.cuda()  # for some reason we have to do sparsification on cuda
         mp = BlockSparseModelPatcher()
         mp.add_pattern("bert\.encoder\.layer\.[0-9]+\.intermediate\.dense", {"density": model_args.sparse_density})
         mp.add_pattern("bert\.encoder\.layer\.[0-9]+\.output\.dense", {"density": model_args.sparse_density})
         mp.patch_model(model)
-        logger.info(f"Model sparsified and now has {model.num_parameters()} parameters")
+        logger.info(f"Model sparsified from {num_parameters} parameters, now has {model.num_parameters()} parameters")
 
     logger.info("Preparing bert training dataset...")
-    dataset = prepare_bert_dataset(tokenizer, data_args)
+    dataset = load_from_disk(training_args.encoded_bert_dataset_path)
+    logger.info(f"Using dataset of {len(dataset)} samples")
 
     # never mind the name, we are just splitting bert dataset into two parts
     bert_training_dataset = dataset.train_test_split(train_size=0.9, test_size=0.1)
@@ -475,17 +350,6 @@ def main():
         trainer.save_model()
         if trainer.is_world_process_zero():
             tokenizer.save_pretrained(training_args.output_dir)
-
-
-def prepare_training_args(training_args: TrainingArguments, second_phase_training_args: TrainingArguments):
-    training_args.warmup_steps = int(second_phase_training_args.max_steps_phase2 *
-                                     second_phase_training_args.warmup_proportion_phase2)
-    training_args.learning_rate = second_phase_training_args.learning_rate_phase2
-    training_args.max_steps += second_phase_training_args.max_steps_phase2
-    training_args.gradient_accumulation_steps = second_phase_training_args.gradient_accumulation_steps_phase2
-    training_args.per_device_train_batch_size = second_phase_training_args.per_device_train_batch_size_phase2
-    training_args.run_name = training_args.run_name + "_2_phase"
-    return training_args
 
 
 def _mp_fn(index):
