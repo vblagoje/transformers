@@ -26,7 +26,6 @@ from apex.optimizers import FusedLAMB
 from dataclasses import dataclass, field
 from datasets import load_from_disk
 from pytorch_block_sparse import BlockSparseModelPatcher
-from schedulers import PolyWarmUpScheduler
 from torch.utils.data.dataset import Dataset
 
 from transformers import (
@@ -34,7 +33,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
     set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerState,
-    TrainerCallback, EvalPrediction, PreTrainedModel, DataCollator, )
+    TrainerCallback, EvalPrediction, PreTrainedModel, DataCollator, get_polynomial_decay_schedule_with_warmup, )
 
 nltk.download('punkt')
 
@@ -68,9 +67,9 @@ class BertTrainer(Trainer):
             optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
             **kwargs,
     ):
-        super(Trainer, self).__init__(model, args, data_collator, train_dataset,
-                                      eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers,
-                                      **kwargs)
+        super(BertTrainer, self).__init__(model, args, data_collator, train_dataset,
+                                          eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers,
+                                          **kwargs)
 
 
 @dataclass
@@ -200,10 +199,13 @@ def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer,
 
     optimizer = FusedLAMB(optimizer_grouped_parameters,
                           lr=args.learning_rate)
-    lr_scheduler = PolyWarmUpScheduler(optimizer,
-                                       warmup=args.warmup_proportion,
-                                       total_steps=args.max_steps)
-
+    # lr_scheduler = PolyWarmUpScheduler(optimizer,
+    #                                    warmup=args.warmup_proportion,
+    #                                    total_steps=args.max_steps)
+    lr_scheduler = get_polynomial_decay_schedule_with_warmup(optimizer=optimizer,
+                                                             num_warmup_steps=int(
+                                                                 args.warmup_proportion * args.max_steps),
+                                                             num_training_steps=args.max_steps)
     return optimizer, lr_scheduler
 
 

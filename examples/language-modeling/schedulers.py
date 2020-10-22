@@ -15,16 +15,16 @@
 import math
 import torch
 from torch.optim.optimizer import Optimizer
-from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim.lr_scheduler import LambdaLR
 
 
-class LRScheduler(_LRScheduler):
+class LRScheduler(LambdaLR):
     def __init__(self, optimizer, last_epoch=-1):
         # Check if using mixed precision training
         self.mixed_training = False
         base_optimizer = optimizer
 
-        # Check that optimizer param is valid 
+        # Check that optimizer param is valid
         if not isinstance(optimizer, Optimizer):
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
