@@ -204,7 +204,7 @@ def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer,
                                        warmup=args.warmup_proportion,
                                        total_steps=args.max_steps)
 
-    return Tuple[optimizer, lr_scheduler]
+    return optimizer, lr_scheduler
 
 
 def main():
