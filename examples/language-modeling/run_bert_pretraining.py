@@ -190,18 +190,14 @@ def prepare_training_args(training_args: TrainingArguments, second_phase_trainin
 
 
 def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
-    param_optimizer = list(model.named_parameters())
-    no_decay = ['bias', 'gamma', 'beta', 'LayerNorm']
+    m_params = list(model.named_parameters())
+    no_decay = ['bias', 'gamma', 'beta', 'LayerNorm.weight']
 
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}]
+        {'params': [p for n, p in m_params if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
+        {'params': [p for n, p in m_params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}]
 
-    optimizer = FusedLAMB(optimizer_grouped_parameters,
-                          lr=args.learning_rate)
-    # lr_scheduler = PolyWarmUpScheduler(optimizer,
-    #                                    warmup=args.warmup_proportion,
-    #                                    total_steps=args.max_steps)
+    optimizer = FusedLAMB(optimizer_grouped_parameters, lr=args.learning_rate)
     lr_scheduler = get_polynomial_decay_schedule_with_warmup(optimizer=optimizer,
                                                              num_warmup_steps=int(
                                                                  args.warmup_proportion * args.max_steps),
@@ -338,9 +334,6 @@ def main():
                                                                                   block_size=512),
                               train_dataset=DatasetAdapter(second_bert_training_dataset),
                               optimizers=prepare_optimizer_and_scheduler(model, second_phase_training_args))
-
-            # adjust optimizer/scheduler for second phase
-            trainer.create_optimizer_and_scheduler(num_training_steps=second_phase_training_args.max_steps_phase2)
 
             trainer_state = TrainerState.load_from_json(json_path=os.path.join(training_args.output_dir,
                                                                                "trainer_state.json"))
