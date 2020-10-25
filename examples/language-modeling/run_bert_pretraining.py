@@ -18,7 +18,7 @@ import logging
 import os
 from copy import copy
 from typing import Dict, List, Optional, Callable, Tuple, Union
-
+import wandb
 import datasets
 import nltk
 import torch
@@ -178,14 +178,15 @@ def find_checkpoint(args: TrainingArguments):
     return checkpoint_dir
 
 
-def prepare_training_args(training_args: TrainingArguments, second_phase_training_args: BertTrainingArguments):
-    training_args.warmup_steps = int(second_phase_training_args.max_steps_phase2 *
-                                     second_phase_training_args.warmup_proportion_phase2)
-    training_args.learning_rate = second_phase_training_args.learning_rate_phase2
-    training_args.max_steps += second_phase_training_args.max_steps_phase2
-    training_args.gradient_accumulation_steps = second_phase_training_args.gradient_accumulation_steps_phase2
-    training_args.per_device_train_batch_size = second_phase_training_args.per_device_train_batch_size_phase2
-    training_args.run_name = training_args.run_name + "_2_phase"
+def prepare_second_phase_training_args(training_args: BertTrainingArguments):
+    # shift second phase to the end of first phase
+    training_args.warmup_steps = training_args.max_steps + int(training_args.max_steps_phase2 *
+                                                               training_args.warmup_proportion_phase2)
+    training_args.max_steps = training_args.max_steps + training_args.max_steps_phase2
+
+    training_args.learning_rate = training_args.learning_rate_phase2
+    training_args.gradient_accumulation_steps = training_args.gradient_accumulation_steps_phase2
+    training_args.per_device_train_batch_size = training_args.per_device_train_batch_size_phase2
     return training_args
 
 
@@ -199,8 +200,7 @@ def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer,
 
     optimizer = FusedLAMB(optimizer_grouped_parameters, lr=args.learning_rate)
     lr_scheduler = get_polynomial_decay_schedule_with_warmup(optimizer=optimizer,
-                                                             num_warmup_steps=int(
-                                                                 args.warmup_proportion * args.max_steps),
+                                                             num_warmup_steps=args.warmup_steps,
                                                              num_training_steps=args.max_steps)
     return optimizer, lr_scheduler
 
@@ -293,16 +293,14 @@ def main():
     logger.info(f"Second phase training dataset has {len(second_bert_training_dataset)} sequence pairs.")
 
     first_phase_training_args = copy(training_args)
-    second_phase_training_args = copy(training_args)
 
     first_phase_training_args.warmup_steps = int(first_phase_training_args.max_steps *
                                                  first_phase_training_args.warmup_proportion)
 
     # Training
     if training_args.do_train:
-
+        checkpoint_dir = find_checkpoint(training_args)
         if training_args.do_phase1_training:
-            checkpoint_dir = find_checkpoint(training_args)
             if checkpoint_dir:
                 logger.info(f"Training continues from checkpoint {checkpoint_dir}")
                 model = model.from_pretrained(checkpoint_dir)
@@ -318,18 +316,19 @@ def main():
                               optimizers=prepare_optimizer_and_scheduler(model, first_phase_training_args))
             # checkpoint_dir is ignored if None
             trainer.train(model_path=checkpoint_dir)
+            # TODO shorten to wandb.unwatch(model) once it is imported into wandb namespace
+            wandb.wandb_sdk.wandb_watch.unwatch(model)
             trainer.state.save_to_json(json_path=os.path.join(training_args.output_dir, "trainer_state.json"))
 
         if training_args.do_phase2_training:
-            checkpoint_dir = find_checkpoint(training_args)
             if checkpoint_dir and not training_args.do_phase1_training:
                 logger.info(f"Training phase 2 continues from checkpoint {checkpoint_dir}, please wait...")
                 model = model.from_pretrained(checkpoint_dir)
                 model.train()
                 logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint")
 
-            trainer = Trainer(model=model,
-                              args=prepare_training_args(copy(training_args), second_phase_training_args),
+            second_phase_training_args = prepare_second_phase_training_args(copy(training_args))
+            trainer = Trainer(model=model, args=second_phase_training_args,
                               data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
                                                                                   block_size=512),
                               train_dataset=DatasetAdapter(second_bert_training_dataset),
@@ -340,9 +339,9 @@ def main():
             logger.info(f"Starting phase 2, parameters {trainer.args}, global step is {trainer_state.global_step}")
             trainer.train(model_path=training_args.output_dir if trainer_state else None)
 
-        trainer.save_model()
-        if trainer.is_world_process_zero():
-            tokenizer.save_pretrained(training_args.output_dir)
+            trainer.save_model()
+            if trainer.is_world_process_zero():
+                tokenizer.save_pretrained(training_args.output_dir)
 
 
 def _mp_fn(index):
