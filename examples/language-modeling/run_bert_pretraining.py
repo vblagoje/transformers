@@ -20,7 +20,6 @@ from copy import copy
 from typing import Dict, List, Optional, Callable, Tuple, Union
 
 import datasets
-import nltk
 import torch
 import wandb
 from apex.optimizers import FusedLAMB
@@ -35,8 +34,6 @@ from transformers import (
     TrainingArguments,
     set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerCallback,
     EvalPrediction, PreTrainedModel, DataCollator, get_polynomial_decay_schedule_with_warmup, )
-
-nltk.download('punkt')
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +166,13 @@ class BertTrainingArguments(TrainingArguments):
     )
 
 
+def get_world_size(args):
+    world_size = 1
+    if args.local_rank != -1:
+        world_size = torch.distributed.get_world_size()
+    return max(1, world_size)
+
+
 def find_checkpoint(args: TrainingArguments):
     checkpoint_dir = os.path.join(args.output_dir, "checkpoint-*")
     checkpoints = glob.glob(checkpoint_dir)
@@ -283,15 +287,23 @@ def main():
 
     logger.info("Preparing bert training dataset...")
     dataset = load_from_disk(data_args.encoded_bert_dataset_path)
-    logger.info(f"Using dataset of {len(dataset)} samples")
+    logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
 
-    # never mind the name, we are just splitting bert dataset into two parts
+    world_size = get_world_size(training_args)
+
+    if world_size > 1:
+        rank = torch.distributed.get_rank()
+        dataset = dataset.shard(num_shards=world_size, index=rank)
+        logger.info(f"Process with rank {rank} got assigned dataset subset of {len(dataset)} samples")
+
+    # never mind the method invocation name (train_test_split), we are just splitting bert pre-training dataset into
+    # two parts, first for phase 1, and second for phase 2
     bert_training_dataset = dataset.train_test_split(train_size=0.9, test_size=0.1)
     first_bert_training_dataset = bert_training_dataset["train"]
     second_bert_training_dataset = bert_training_dataset["test"]
 
-    logger.info(f"First phase training dataset has {len(first_bert_training_dataset)} sequence pairs.")
-    logger.info(f"Second phase training dataset has {len(second_bert_training_dataset)} sequence pairs.")
+    logger.info(f"First phase pre-training dataset has {len(first_bert_training_dataset)} sequence pairs.")
+    logger.info(f"Second phase pre-training dataset has {len(second_bert_training_dataset)} sequence pairs.")
 
     first_phase_training_args = copy(training_args)
 
