@@ -18,10 +18,11 @@ import logging
 import os
 from copy import copy
 from typing import Dict, List, Optional, Callable, Tuple, Union
-import wandb
+
 import datasets
 import nltk
 import torch
+import wandb
 from apex.optimizers import FusedLAMB
 from dataclasses import dataclass, field
 from datasets import load_from_disk
@@ -32,8 +33,8 @@ from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
-    set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerState,
-    TrainerCallback, EvalPrediction, PreTrainedModel, DataCollator, get_polynomial_decay_schedule_with_warmup, )
+    set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerCallback,
+    EvalPrediction, PreTrainedModel, DataCollator, get_polynomial_decay_schedule_with_warmup, )
 
 nltk.download('punkt')
 
@@ -180,9 +181,9 @@ def find_checkpoint(args: TrainingArguments):
 
 def prepare_second_phase_training_args(training_args: BertTrainingArguments):
     # shift second phase to the end of first phase
-    training_args.warmup_steps = training_args.max_steps + int(training_args.max_steps_phase2 *
-                                                               training_args.warmup_proportion_phase2)
-    training_args.max_steps = training_args.max_steps + training_args.max_steps_phase2
+    training_args.warmup_steps = int(training_args.max_steps_phase2 *
+                                     training_args.warmup_proportion_phase2)
+    training_args.max_steps = training_args.max_steps_phase2
 
     training_args.learning_rate = training_args.learning_rate_phase2
     training_args.gradient_accumulation_steps = training_args.gradient_accumulation_steps_phase2
@@ -316,12 +317,11 @@ def main():
                               optimizers=prepare_optimizer_and_scheduler(model, first_phase_training_args))
             # checkpoint_dir is ignored if None
             trainer.train(model_path=checkpoint_dir)
-            # TODO shorten to wandb.unwatch(model) once it is imported into wandb namespace
-            wandb.wandb_sdk.wandb_watch.unwatch(model)
-            trainer.state.save_to_json(json_path=os.path.join(training_args.output_dir, "trainer_state.json"))
+            wandb.finish()  # TODO hide in callback
 
         if training_args.do_phase2_training:
-            if checkpoint_dir and not training_args.do_phase1_training:
+            continue_phase_2: bool = checkpoint_dir and not training_args.do_phase1_training
+            if continue_phase_2:
                 logger.info(f"Training phase 2 continues from checkpoint {checkpoint_dir}, please wait...")
                 model = model.from_pretrained(checkpoint_dir)
                 model.train()
@@ -334,10 +334,8 @@ def main():
                               train_dataset=DatasetAdapter(second_bert_training_dataset),
                               optimizers=prepare_optimizer_and_scheduler(model, second_phase_training_args))
 
-            trainer_state = TrainerState.load_from_json(json_path=os.path.join(training_args.output_dir,
-                                                                               "trainer_state.json"))
-            logger.info(f"Starting phase 2, parameters {trainer.args}, global step is {trainer_state.global_step}")
-            trainer.train(model_path=training_args.output_dir if trainer_state else None)
+            logger.info(f"Starting phase 2, parameters {trainer.args}")
+            trainer.train(model_path=checkpoint_dir if continue_phase_2 else None)
 
             trainer.save_model()
             if trainer.is_world_process_zero():
