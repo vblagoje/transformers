@@ -14,10 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Create masked LM/next sentence masked_lm TF examples for BERT."""
-
-from __future__ import absolute_import, division, print_function, unicode_literals
-
+"""Create masked LM/next sentence masked_lm dataset for BERT."""
 import collections
 import logging
 import random
@@ -26,7 +23,7 @@ from typing import List, Dict, Any, Optional
 import nltk
 import numpy as np
 from dataclasses import dataclass, field
-from datasets import load_from_disk, Dataset
+from datasets import load_from_disk, Dataset, load_dataset
 
 from transformers import (BertTokenizer, PreTrainedTokenizer, HfArgumentParser)
 
@@ -46,14 +43,11 @@ class TrainingInstance(object):
 
     def __str__(self):
         s = ""
-        s += "tokens: %s\n" % (" ".join(
-            [x for x in self.tokens]))
+        s += "tokens: %s\n" % (" ".join([x for x in self.tokens]))
         s += "segment_ids: %s\n" % (" ".join([str(x) for x in self.segment_ids]))
         s += "is_random_next: %s\n" % self.is_random_next
-        s += "masked_lm_positions: %s\n" % (" ".join(
-            [str(x) for x in self.masked_lm_positions]))
-        s += "masked_lm_labels: %s\n" % (" ".join(
-            [x for x in self.masked_lm_labels]))
+        s += "masked_lm_positions: %s\n" % (" ".join([str(x) for x in self.masked_lm_positions]))
+        s += "masked_lm_labels: %s\n" % (" ".join([x for x in self.masked_lm_labels]))
         s += "\n"
         return s
 
@@ -127,23 +121,21 @@ def convert_instances_to_dataset(instances, tokenizer, max_seq_length, max_predi
     return Dataset.from_dict(features)
 
 
-def create_training_instances(all_documents, tokenizer: PreTrainedTokenizer, max_seq_length,
-                              dupe_factor, short_seq_prob, masked_lm_prob,
-                              max_predictions_per_seq, rng):
+def create_training_instances(all_documents, tokenizer: PreTrainedTokenizer, args):
     """Create `TrainingInstance`s from documents."""
-
+    rng = random.Random(args.random_seed)
     # Remove empty documents
     all_documents = [x for x in all_documents if x]
     rng.shuffle(all_documents)
 
     vocab_words = list(tokenizer.get_vocab().keys())
     instances = []
-    for _ in range(dupe_factor):
+    for _ in range(args.dupe_factor):
         for document_index in range(len(all_documents)):
             instances.extend(
                 create_instances_from_document(
-                    all_documents, document_index, max_seq_length, short_seq_prob,
-                    masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
+                    all_documents, document_index, args.max_seq_length, args.short_seq_prob,
+                    args.masked_lm_prob, args.max_predictions_per_seq, vocab_words, rng))
 
     rng.shuffle(instances)
     return instances
@@ -364,6 +356,11 @@ class PreTrainingArguments:
         metadata={"help": "Input dataset name consisting of text docs used to create LM pre-training features"}
     )
 
+    input_dataset_local: bool = field(
+        default=True,
+        metadata={"help": "If dataset is disk local, otherwise load dataset using load_dataset"}
+    )
+
     output_dataset: str = field(
         default="./pre_training_dataset",
         metadata={"help": "Output dataset name with created LM pre-training features"}
@@ -378,9 +375,7 @@ class PreTrainingArguments:
 
     dupe_factor: Optional[int] = field(
         default=2,
-        metadata={"help": "The maximum total input sequence length after WordPiece tokenization. \n"
-                          "Sequences longer than this will be truncated, and sequences shorter \n"
-                          "than this will be padded."}
+        metadata={"help": "Number of times to duplicate the input data (with different masks)."}
     )
 
     max_predictions_per_seq: Optional[int] = field(
@@ -422,7 +417,11 @@ def main():
 
     tokenizer = BertTokenizer.from_pretrained(args.tokenizer)
 
-    dataset = load_from_disk(args.input_dataset)
+    if args.input_dataset_local:
+        dataset = load_from_disk(args.input_dataset)
+    else:
+        dataset = load_dataset('wikipedia', "20200501.en", split='train')
+
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
     logger.info(f"Segmenting pre-training dataset into sentences. Please wait...")
     dataset = dataset.map(segment_sentences, batched=True, remove_columns=dataset.column_names)
@@ -431,17 +430,14 @@ def main():
 
     all_documents = list([d for d in documents["tokens"]])
     logger.info(f"Creating training instances, please wait...")
-    rng = random.Random(args.random_seed)
-    instances = create_training_instances(all_documents, tokenizer, args.max_seq_length, args.dupe_factor,
-                                          args.short_seq_prob, args.masked_lm_prob, args.max_predictions_per_seq,
-                                          rng)
+    instances = create_training_instances(all_documents, tokenizer, args)
     show_samples = 3
     logger.info(f"Created {len(instances)} training instances. Here are a {show_samples} samples:")
 
     for idx, instance in enumerate(instances):
         if idx >= show_samples:
             break
-        logger.info(instance)
+        logger.info(f"Pre-training instance sample #{idx}:\n{str(instance)}")
 
     logger.info(f"Creating dataset for {len(instances)} training instances.")
     encoded_pre_training_dataset = convert_instances_to_dataset(instances, tokenizer, args.max_seq_length,
@@ -449,13 +445,6 @@ def main():
 
     encoded_pre_training_dataset.save_to_disk(args.output_dataset)
     logger.info(f"Prepared and saved pre-training dataset with {len(encoded_pre_training_dataset)} training instances.")
-
-    # loaded_dataset = load_from_disk("./encoded_bert_pre_training_dataset")
-    # print(loaded_dataset)
-
-    # loaded_dataset.set_format(type='torch', output_all_columns=True)
-    # dataloader = torch.utils.data.DataLoader(loaded_dataset, batch_size=2)
-    # print(next(iter(dataloader)))
 
 
 if __name__ == "__main__":
