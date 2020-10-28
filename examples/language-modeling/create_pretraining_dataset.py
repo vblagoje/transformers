@@ -27,6 +27,7 @@ from datasets import load_from_disk, Dataset, load_dataset
 
 from transformers import (BertTokenizer, PreTrainedTokenizer, HfArgumentParser)
 
+nltk.download('punkt')
 logger = logging.getLogger(__name__)
 
 
