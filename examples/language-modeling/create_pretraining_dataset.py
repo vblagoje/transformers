@@ -25,7 +25,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from datasets import load_from_disk, Dataset, load_dataset
 
-from transformers import (BertTokenizer, PreTrainedTokenizer, HfArgumentParser)
+from transformers import (BertTokenizer, PreTrainedTokenizer, HfArgumentParser, BertTokenizerFast)
 
 nltk.download('punkt')
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ def create_training_instances(all_documents, tokenizer: PreTrainedTokenizer, arg
     """Create `TrainingInstance`s from documents."""
     rng = random.Random(args.random_seed)
     # Remove empty documents
-    all_documents = [x for x in all_documents if x]
+    # all_documents = [x for x in all_documents if x]
     rng.shuffle(all_documents)
 
     vocab_words = list(tokenizer.get_vocab().keys())
@@ -357,9 +357,9 @@ class PreTrainingArguments:
         metadata={"help": "Input dataset name consisting of text docs used to create LM pre-training features"}
     )
 
-    input_dataset_local: bool = field(
-        default=True,
-        metadata={"help": "If dataset is disk local, otherwise load dataset using load_dataset"}
+    input_dataset_remote: bool = field(
+        default=False,
+        metadata={"help": "If dataset is remote, get it using load_dataset, otherwise load dataset using load_dataset"}
     )
 
     output_dataset: str = field(
@@ -416,9 +416,9 @@ def main():
         level=logging.INFO,
     )
 
-    tokenizer = BertTokenizer.from_pretrained(args.tokenizer)
+    tokenizer = BertTokenizerFast.from_pretrained(args.tokenizer)
 
-    if args.input_dataset_local:
+    if not args.input_dataset_remote:
         dataset = load_from_disk(args.input_dataset)
     else:
         dataset = load_dataset('wikipedia', "20200501.en", split='train')
@@ -429,9 +429,8 @@ def main():
     logger.info(f"Segmented pre-training dataset into sentences, tokenizing sentences...")
     documents = dataset.map(TokenizerLambda(tokenizer), batched=True, remove_columns=dataset.column_names)
 
-    all_documents = list([d for d in documents["tokens"]])
     logger.info(f"Creating training instances, please wait...")
-    instances = create_training_instances(all_documents, tokenizer, args)
+    instances = create_training_instances(documents["tokens"], tokenizer, args)
     show_samples = 3
     logger.info(f"Created {len(instances)} training instances. Here are a {show_samples} samples:")
 
