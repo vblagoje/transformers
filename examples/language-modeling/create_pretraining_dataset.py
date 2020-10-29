@@ -417,6 +417,7 @@ class InstanceConverterLambda(object):
 
                 next_sentence_label = 1 if instance.is_random_next else 0
 
+                # masked_lm_weights omitted for pytorch, needed for tf features
                 all_input_ids.append(input_ids)
                 all_input_mask.append(input_mask)
                 all_segment_ids.append(segment_ids)
@@ -430,6 +431,12 @@ class InstanceConverterLambda(object):
                 "masked_lm_positions": all_masked_lm_positions,
                 "masked_lm_ids": all_masked_lm_ids,
                 "next_sentence_labels": all_next_sentence_labels}
+
+
+def cache_name(name: str, args: PreTrainingArguments) -> str:
+    return "_".join([name,
+                     args.tokenizer,
+                     str(args.max_seq_length)])
 
 
 def segment_sentences(docs):
@@ -466,10 +473,12 @@ def main():
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
     logger.info(f"Segmenting pre-training dataset into sentences. Please wait...")
     dataset = dataset.map(segment_sentences, batched=True, remove_columns=dataset.column_names,
+                          cache_file_name=cache_name("first_cache", args),
                           num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Segmented pre-training dataset into sentences, tokenizing sentences...")
     documents = dataset.map(TokenizerLambda(tokenizer), batched=True, remove_columns=dataset.column_names,
+                            cache_file_name=cache_name("second_cache", args),
                             num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
@@ -479,6 +488,7 @@ def main():
                                                             masked_lm_prob=args.masked_lm_prob,
                                                             dupe_factor=args.dupe_factor,
                                                             max_predictions_per_seq=args.max_predictions_per_seq),
+                              cache_file_name=cache_name("third_cache", args),
                               batched=True, remove_columns=documents.column_names,
                               num_proc=args.num_proc if args.num_proc > 0 else None)
 
@@ -499,6 +509,7 @@ def main():
 
     pre_training_dataset = instances.map(
         InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
+        cache_file_name=cache_name("fourth_cache", args),
         batched=True, remove_columns=instances.column_names, num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Saving dataset to disk, please wait...")
