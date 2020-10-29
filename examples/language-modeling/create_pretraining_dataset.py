@@ -168,6 +168,73 @@ class TrainingInstanceFactoryLambda(object):
                 "masked_lm_labels": all_masked_lm_labels}
 
 
+class InstanceConverterLambda(object):
+
+    def __init__(self, tokenizer: PreTrainedTokenizer, max_seq_length: int, max_predictions_per_seq: int):
+        self.tokenizer = tokenizer
+        # self.text_column: str = text_column
+        self.max_seq_length = max_seq_length
+        self.max_predictions_per_seq = max_predictions_per_seq
+
+    def __call__(self, documents: List[str]) -> Dict[str, Any]:
+        return self.convert_instances_to_dataset(documents, self.tokenizer,
+                                                 self.max_seq_length, self.max_predictions_per_seq)
+
+    def convert_instances_to_dataset(self, instances, tokenizer, max_seq_length, max_predictions_per_seq):
+        """Create new HF dataset from `TrainingInstances."""
+
+        features = collections.OrderedDict()
+        num_instances = len(instances)
+        features["input_ids"] = np.zeros([num_instances, max_seq_length], dtype="int32")
+        features["input_mask"] = np.zeros([num_instances, max_seq_length], dtype="int32")
+        features["segment_ids"] = np.zeros([num_instances, max_seq_length], dtype="int32")
+        features["masked_lm_positions"] = np.zeros([num_instances, max_predictions_per_seq], dtype="int32")
+        features["masked_lm_ids"] = np.zeros([num_instances, max_predictions_per_seq], dtype="int32")
+        features["next_sentence_labels"] = np.zeros(num_instances, dtype="int32")
+
+        # for (idx, instance) in enumerate(instances):
+        for idx, (tokens_it, segment_ids_it, masked_lm_positions_it, masked_lm_labels_it, is_random_next_it) in enumerate(
+                zip(instances['tokens'],
+                    instances['segment_ids'],
+                    instances['masked_lm_positions'],
+                    instances['masked_lm_labels'],
+                    instances['is_random_next'])):
+
+            input_ids = tokenizer.convert_tokens_to_ids(tokens_it)
+            input_mask = [1] * len(input_ids)
+            segment_ids = list(segment_ids_it)
+            assert len(input_ids) <= max_seq_length
+
+            while len(input_ids) < max_seq_length:
+                input_ids.append(0)
+                input_mask.append(0)
+                segment_ids.append(0)
+
+            assert len(input_ids) == max_seq_length
+            assert len(input_mask) == max_seq_length
+            assert len(segment_ids) == max_seq_length
+
+            masked_lm_positions = list(masked_lm_positions_it)
+            masked_lm_ids = tokenizer.convert_tokens_to_ids(masked_lm_labels_it)
+            masked_lm_weights = [1.0] * len(masked_lm_ids)
+
+            while len(masked_lm_positions) < max_predictions_per_seq:
+                masked_lm_positions.append(0)
+                masked_lm_ids.append(0)
+                masked_lm_weights.append(0.0)
+
+            next_sentence_label = 1 if is_random_next_it else 0
+
+            features["input_ids"][idx] = input_ids
+            features["input_mask"][idx] = input_mask
+            features["segment_ids"][idx] = segment_ids
+            features["masked_lm_positions"][idx] = masked_lm_positions
+            features["masked_lm_ids"][idx] = masked_lm_ids
+            features["next_sentence_labels"][idx] = next_sentence_label
+
+        return Dataset.from_dict(features)
+
+
 def convert_instances_to_dataset(instances, tokenizer, max_seq_length, max_predictions_per_seq):
     """Create new HF dataset from `TrainingInstances."""
 
@@ -468,11 +535,16 @@ def main():
                     f"\nmasked_lm_labels:{str(instance['masked_lm_labels'][idx])}\n")
 
     # logger.info(f"Creating dataset for {len(instances)} training instances.")
-    # encoded_pre_training_dataset = convert_instances_to_dataset(instances, tokenizer, args.max_seq_length,
+
+    pre_training_dataset = instances.map(InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
+                                         batched=True,
+                                         batch_size=10,
+                                         remove_columns=instances.column_names)
+    #encoded_pre_training_dataset = convert_instances_to_dataset(instances, tokenizer, args.max_seq_length,
     #                                                             args.max_predictions_per_seq)
     #
-    # encoded_pre_training_dataset.save_to_disk(args.output_dataset)
-    # logger.info(f"Prepared and saved pre-training dataset with {len(encoded_pre_training_dataset)} training instances.")
+    pre_training_dataset.save_to_disk(args.output_dataset)
+    logger.info(f"Prepared and saved pre-training dataset with {len(pre_training_dataset)} training instances.")
 
 
 if __name__ == "__main__":
