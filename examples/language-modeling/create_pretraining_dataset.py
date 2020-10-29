@@ -495,12 +495,13 @@ def main():
                     f"\nmasked_lm_positions:{str(instance['masked_lm_positions'][idx])} "
                     f"\nmasked_lm_labels:{str(instance['masked_lm_labels'][idx])}\n")
 
-    # logger.info(f"Creating dataset for {len(instances)} training instances.")
+    logger.info(f"Creating dataset of pre-training instances.")
 
     pre_training_dataset = instances.map(
         InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
         batched=True, remove_columns=instances.column_names, num_proc=args.num_proc if args.num_proc > 0 else None)
 
+    logger.info(f"Saving dataset to disk, please wait...")
     pre_training_dataset.save_to_disk(args.output_dataset)
     logger.info(f"Prepared and saved pre-training dataset with {len(pre_training_dataset)} training instances.")
 
