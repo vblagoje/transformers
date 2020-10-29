@@ -25,10 +25,70 @@ import numpy as np
 from dataclasses import dataclass, field
 from datasets import load_from_disk, Dataset, load_dataset
 
-from transformers import (BertTokenizer, PreTrainedTokenizer, HfArgumentParser, BertTokenizerFast)
+from transformers import (PreTrainedTokenizer, HfArgumentParser, BertTokenizerFast)
 
 nltk.download('punkt')
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PreTrainingArguments:
+    input_dataset: str = field(
+        default="./small_wikipedia_sample",
+        metadata={"help": "Input dataset name consisting of text docs used to create LM pre-training features"}
+    )
+
+    input_dataset_remote: bool = field(
+        default=False,
+        metadata={"help": "If dataset is remote, get it using load_dataset, otherwise load dataset using load_dataset"}
+    )
+
+    output_dataset: str = field(
+        default="./pre_training_dataset",
+        metadata={"help": "Output dataset name with created LM pre-training features"}
+    )
+
+    max_seq_length: Optional[int] = field(
+        default=128,
+        metadata={"help": "The maximum total input sequence length after WordPiece tokenization. \n"
+                          "Sequences longer than this will be truncated, and sequences shorter \n"
+                          "than this will be padded."}
+    )
+
+    dupe_factor: Optional[int] = field(
+        default=2,
+        metadata={"help": "Number of times to duplicate the input data (with different masks)."}
+    )
+
+    num_proc: Optional[int] = field(
+        default=0,
+        metadata={"help": "Number of processes for multiprocessing. By default it doesn't use multiprocessing."}
+    )
+
+    max_predictions_per_seq: Optional[int] = field(
+        default=20,
+        metadata={"help": "The maximum number of masked tokens per sequence"}
+    )
+
+    random_seed: Optional[int] = field(
+        default=12345,
+        metadata={"help": "Random seed initialization"}
+    )
+
+    masked_lm_prob: Optional[float] = field(
+        default=0.15,
+        metadata={"help": "The masked LM probability"}
+    )
+
+    short_seq_prob: Optional[float] = field(
+        default=0.1,
+        metadata={"help": "Probability to create a sequence shorter than maximum sequence length"}
+    )
+
+    tokenizer: Optional[str] = field(
+        default='bert-base-uncased',
+        metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
+    )
 
 
 class TrainingInstance(object):
@@ -72,6 +132,40 @@ class TokenizerLambda(object):
                 tokenized_doc.append(tokens)
             outputs.append(tokenized_doc)
         return {'tokens': outputs}
+
+
+class TrainingInstanceFactoryLambda(object):
+
+    def __init__(self, tokenizer: PreTrainedTokenizer, text_column: str = "tokens"):
+        self.tokenizer = tokenizer
+        # self.args = args
+        self.text_column: str = text_column
+
+    def __call__(self, documents: List[str]) -> Dict[str, Any]:
+        """Create `TrainingInstance`s from documents."""
+        # rng = random.Random(self.args.random_seed)
+        rng = random.Random(12345)
+        # Remove empty documents
+        # all_documents = [x for x in all_documents if x]
+        # rng.shuffle(all_documents)
+        # print(f"len(documents): {len(documents[self.text_column])}")
+        vocab_words = list(self.tokenizer.get_vocab().keys())
+        all_tokens, all_segment_ids, all_is_random_next, all_masked_lm_positions, all_masked_lm_labels = [], [], [], [], []
+
+        for document_index in range(len(documents[self.text_column])):
+            tokens, segment_ids, is_random_next, masked_lm_positions, masked_lm_labels = create_instances_from_document(
+                documents[self.text_column], document_index, 128, 0.1,
+                0.15, 20, vocab_words, rng)
+            all_tokens.append(tokens)
+            all_segment_ids.append(segment_ids)
+            all_is_random_next.append(is_random_next)
+            all_masked_lm_positions.append(masked_lm_positions)
+            all_masked_lm_labels.append(masked_lm_labels)
+
+        return {"tokens": all_tokens, "segment_ids": all_segment_ids,
+                "is_random_next": all_is_random_next,
+                "masked_lm_positions": all_masked_lm_positions,
+                "masked_lm_labels": all_masked_lm_labels}
 
 
 def convert_instances_to_dataset(instances, tokenizer, max_seq_length, max_predictions_per_seq):
@@ -122,26 +216,6 @@ def convert_instances_to_dataset(instances, tokenizer, max_seq_length, max_predi
     return Dataset.from_dict(features)
 
 
-def create_training_instances(all_documents, tokenizer: PreTrainedTokenizer, args):
-    """Create `TrainingInstance`s from documents."""
-    rng = random.Random(args.random_seed)
-    # Remove empty documents
-    # all_documents = [x for x in all_documents if x]
-    rng.shuffle(all_documents)
-
-    vocab_words = list(tokenizer.get_vocab().keys())
-    instances = []
-    for _ in range(args.dupe_factor):
-        for document_index in range(len(all_documents)):
-            instances.extend(
-                create_instances_from_document(
-                    all_documents, document_index, args.max_seq_length, args.short_seq_prob,
-                    args.masked_lm_prob, args.max_predictions_per_seq, vocab_words, rng))
-
-    rng.shuffle(instances)
-    return instances
-
-
 def create_instances_from_document(
         all_documents, document_index, max_seq_length, short_seq_prob,
         masked_lm_prob, max_predictions_per_seq, vocab_words, rng):
@@ -167,10 +241,10 @@ def create_instances_from_document(
     # next sentence prediction task too easy. Instead, we split the input into
     # segments "A" and "B" based on the actual "sentences" provided by the user
     # input.
-    instances = []
     current_chunk = []
     current_length = 0
     i = 0
+    all_tokens, all_segment_ids, all_is_random_next, all_masked_lm_positions, all_masked_lm_labels = [], [], [], [], []
     while i < len(document):
         segment = document[i]
         current_chunk.append(segment)
@@ -248,18 +322,17 @@ def create_instances_from_document(
                 (tokens, masked_lm_positions,
                  masked_lm_labels) = create_masked_lm_predictions(
                     tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
-                instance = TrainingInstance(
-                    tokens=tokens,
-                    segment_ids=segment_ids,
-                    is_random_next=is_random_next,
-                    masked_lm_positions=masked_lm_positions,
-                    masked_lm_labels=masked_lm_labels)
-                instances.append(instance)
+
+                all_tokens.append(tokens)
+                all_segment_ids.append(segment_ids)
+                all_is_random_next.append(is_random_next)
+                all_masked_lm_positions.append(masked_lm_positions)
+                all_masked_lm_labels.append(masked_lm_labels)
             current_chunk = []
             current_length = 0
         i += 1
 
-    return instances
+    return all_tokens, all_segment_ids, all_is_random_next, all_masked_lm_positions, all_masked_lm_labels
 
 
 MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
@@ -350,61 +423,6 @@ def segment_sentences(docs):
     return {'text': outputs}
 
 
-@dataclass
-class PreTrainingArguments:
-    input_dataset: str = field(
-        default="./small_wikipedia_sample",
-        metadata={"help": "Input dataset name consisting of text docs used to create LM pre-training features"}
-    )
-
-    input_dataset_remote: bool = field(
-        default=False,
-        metadata={"help": "If dataset is remote, get it using load_dataset, otherwise load dataset using load_dataset"}
-    )
-
-    output_dataset: str = field(
-        default="./pre_training_dataset",
-        metadata={"help": "Output dataset name with created LM pre-training features"}
-    )
-
-    max_seq_length: Optional[int] = field(
-        default=128,
-        metadata={"help": "The maximum total input sequence length after WordPiece tokenization. \n"
-                          "Sequences longer than this will be truncated, and sequences shorter \n"
-                          "than this will be padded."}
-    )
-
-    dupe_factor: Optional[int] = field(
-        default=2,
-        metadata={"help": "Number of times to duplicate the input data (with different masks)."}
-    )
-
-    max_predictions_per_seq: Optional[int] = field(
-        default=20,
-        metadata={"help": "The maximum number of masked tokens per sequence"}
-    )
-
-    random_seed: Optional[int] = field(
-        default=12345,
-        metadata={"help": "Random seed initialization"}
-    )
-
-    masked_lm_prob: Optional[float] = field(
-        default=0.15,
-        metadata={"help": "The masked LM probability"}
-    )
-
-    short_seq_prob: Optional[float] = field(
-        default=0.1,
-        metadata={"help": "Probability to create a sequence shorter than maximum sequence length"}
-    )
-
-    tokenizer: Optional[str] = field(
-        default='bert-base-uncased',
-        metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-
-
 def main():
     parser = HfArgumentParser((PreTrainingArguments))
     args, = parser.parse_args_into_dataclasses()
@@ -425,26 +443,36 @@ def main():
 
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
     logger.info(f"Segmenting pre-training dataset into sentences. Please wait...")
-    dataset = dataset.map(segment_sentences, batched=True, remove_columns=dataset.column_names)
-    logger.info(f"Segmented pre-training dataset into sentences, tokenizing sentences...")
-    documents = dataset.map(TokenizerLambda(tokenizer), batched=True, remove_columns=dataset.column_names)
+    dataset = dataset.map(segment_sentences, batched=True, remove_columns=dataset.column_names,
+                          num_proc=args.num_proc if args.num_proc > 0 else None)
 
-    logger.info(f"Creating training instances, please wait...")
-    instances = create_training_instances(documents["tokens"], tokenizer, args)
+    logger.info(f"Segmented pre-training dataset into sentences, tokenizing sentences...")
+    documents = dataset.map(TokenizerLambda(tokenizer), batched=True, remove_columns=dataset.column_names,
+                            num_proc=args.num_proc if args.num_proc > 0 else None)
+
+    logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
+    instances = documents.map(TrainingInstanceFactoryLambda(tokenizer), batched=True, batch_size=100,
+                              remove_columns=documents.column_names)
+
     show_samples = 3
     logger.info(f"Created {len(instances)} training instances. Here are a {show_samples} samples:")
 
     for idx, instance in enumerate(instances):
         if idx >= show_samples:
             break
-        logger.info(f"Pre-training instance sample #{idx}:\n{str(instance)}")
+        logger.info(f"Pre-training instance sample #{idx}:"
+                    f"\ntokens:{str(instance['tokens'][idx])} "
+                    f"\nsegment_ids:{str(instance['segment_ids'][idx])} "
+                    f"\nis_random_next:{str(instance['is_random_next'][idx])} "
+                    f"\nmasked_lm_positions:{str(instance['masked_lm_positions'][idx])} "
+                    f"\nmasked_lm_labels:{str(instance['masked_lm_labels'][idx])}\n")
 
-    logger.info(f"Creating dataset for {len(instances)} training instances.")
-    encoded_pre_training_dataset = convert_instances_to_dataset(instances, tokenizer, args.max_seq_length,
-                                                                args.max_predictions_per_seq)
-
-    encoded_pre_training_dataset.save_to_disk(args.output_dataset)
-    logger.info(f"Prepared and saved pre-training dataset with {len(encoded_pre_training_dataset)} training instances.")
+    # logger.info(f"Creating dataset for {len(instances)} training instances.")
+    # encoded_pre_training_dataset = convert_instances_to_dataset(instances, tokenizer, args.max_seq_length,
+    #                                                             args.max_predictions_per_seq)
+    #
+    # encoded_pre_training_dataset.save_to_disk(args.output_dataset)
+    # logger.info(f"Prepared and saved pre-training dataset with {len(encoded_pre_training_dataset)} training instances.")
 
 
 if __name__ == "__main__":
