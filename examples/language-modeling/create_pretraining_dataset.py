@@ -199,10 +199,10 @@ class InstanceConverterLambda(object):
                     instances['masked_lm_positions'],
                     instances['masked_lm_labels'],
                     instances['is_random_next'])):
-
-            input_ids = tokenizer.convert_tokens_to_ids(tokens_it)
+            instance = TrainingInstance(tokens_it, segment_ids_it, masked_lm_positions_it, masked_lm_labels_it, is_random_next_it)
+            input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
             input_mask = [1] * len(input_ids)
-            segment_ids = list(segment_ids_it)
+            segment_ids = list(instance.segment_ids)
             assert len(input_ids) <= max_seq_length
 
             while len(input_ids) < max_seq_length:
@@ -214,8 +214,8 @@ class InstanceConverterLambda(object):
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
 
-            masked_lm_positions = list(masked_lm_positions_it)
-            masked_lm_ids = tokenizer.convert_tokens_to_ids(masked_lm_labels_it)
+            masked_lm_positions = list(instance.masked_lm_positions)
+            masked_lm_ids = tokenizer.convert_tokens_to_ids(instance.masked_lm_labels)
             masked_lm_weights = [1.0] * len(masked_lm_ids)
 
             while len(masked_lm_positions) < max_predictions_per_seq:
@@ -223,7 +223,7 @@ class InstanceConverterLambda(object):
                 masked_lm_ids.append(0)
                 masked_lm_weights.append(0.0)
 
-            next_sentence_label = 1 if is_random_next_it else 0
+            next_sentence_label = 1 if instance.is_random_next else 0
 
             features["input_ids"][idx] = input_ids
             features["input_mask"][idx] = input_mask
