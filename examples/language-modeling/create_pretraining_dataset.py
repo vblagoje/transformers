@@ -479,7 +479,8 @@ def main():
                                                             masked_lm_prob=args.masked_lm_prob,
                                                             dupe_factor=args.dupe_factor,
                                                             max_predictions_per_seq=args.max_predictions_per_seq),
-                              batched=True, remove_columns=documents.column_names)
+                              batched=True, remove_columns=documents.column_names,
+                              num_proc=args.num_proc if args.num_proc > 0 else None)
 
     show_samples = 3
     logger.info(f"Created {len(instances)} training instances. Here are a {show_samples} samples:")
@@ -498,8 +499,7 @@ def main():
 
     pre_training_dataset = instances.map(
         InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
-        batched=True,
-        remove_columns=instances.column_names)
+        batched=True, remove_columns=instances.column_names, num_proc=args.num_proc if args.num_proc > 0 else None)
 
     pre_training_dataset.save_to_disk(args.output_dataset)
     logger.info(f"Prepared and saved pre-training dataset with {len(pre_training_dataset)} training instances.")
