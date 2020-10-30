@@ -22,7 +22,7 @@ from typing import List, Dict, Any, Optional
 
 import nltk
 from dataclasses import dataclass, field
-from datasets import load_from_disk, load_dataset
+from datasets import load_from_disk, load_dataset, Sequence, Features, Value
 
 from transformers import (PreTrainedTokenizer, HfArgumentParser, BertTokenizerFast)
 
@@ -167,13 +167,14 @@ class TrainingInstanceFactoryLambda(object):
                 tokens, segment_ids, is_random_next, masked_lm_positions, masked_lm_labels = self.create_instances_from_document(
                     documents[self.text_column], document_index, self.max_seq_length, self.short_seq_prob,
                     self.masked_lm_prob, self.max_predictions_per_seq, vocab_words, rng)
-                all_tokens.append(tokens)
-                all_segment_ids.append(segment_ids)
-                all_is_random_next.append(is_random_next)
-                all_masked_lm_positions.append(masked_lm_positions)
-                all_masked_lm_labels.append(masked_lm_labels)
 
-        return {"tokens": all_tokens, "segment_ids": all_segment_ids,
+                all_tokens.extend(tokens)
+                all_segment_ids.extend(segment_ids)
+                all_is_random_next.extend(is_random_next)
+                all_masked_lm_positions.extend(masked_lm_positions)
+                all_masked_lm_labels.extend(masked_lm_labels)
+
+        return {"input_tokens": all_tokens, "segment_ids": all_segment_ids,
                 "is_random_next": all_is_random_next,
                 "masked_lm_positions": all_masked_lm_positions,
                 "masked_lm_labels": all_masked_lm_labels}
@@ -378,52 +379,50 @@ class InstanceConverterLambda(object):
                                                  self.max_seq_length, self.max_predictions_per_seq)
 
     def convert_instances_to_dataset(self, instances, tokenizer, max_seq_length, max_predictions_per_seq):
-        """Create new HF dataset from `TrainingInstances."""
+        """Create new HF dataset from training instances"""
 
         all_input_ids, all_input_mask, all_segment_ids, all_next_sentence_labels, all_masked_lm_positions, \
         all_masked_lm_ids = [], [], [], [], [], []
 
-        for batch_id, (l_tokens, l_segment_ids, l_masked_lm_positions, l_masked_lm_labels, l_random_next) in enumerate(
-                zip(instances['tokens'],
+        for batch_id, (tokens, segment_ids, masked_lm_positions, masked_lm_labels, random_next) in enumerate(
+                zip(instances['input_tokens'],
                     instances['segment_ids'],
                     instances['masked_lm_positions'],
                     instances['masked_lm_labels'],
                     instances['is_random_next'])):
-            for idx in range(len(l_tokens)):
-                instance = TrainingInstance(l_tokens[idx], l_segment_ids[idx], l_masked_lm_positions[idx],
-                                            l_masked_lm_labels[idx], l_random_next[idx])
-                input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
-                input_mask = [1] * len(input_ids)
-                segment_ids = list(instance.segment_ids)
-                assert len(input_ids) <= max_seq_length
 
-                while len(input_ids) < max_seq_length:
-                    input_ids.append(0)
-                    input_mask.append(0)
-                    segment_ids.append(0)
+            input_ids = tokenizer.convert_tokens_to_ids(tokens)
+            input_mask = [1] * len(input_ids)
+            segment_ids = list(segment_ids)
+            assert len(input_ids) <= max_seq_length
 
-                assert len(input_ids) == max_seq_length
-                assert len(input_mask) == max_seq_length
-                assert len(segment_ids) == max_seq_length
+            while len(input_ids) < max_seq_length:
+                input_ids.append(0)
+                input_mask.append(0)
+                segment_ids.append(0)
 
-                masked_lm_positions = list(instance.masked_lm_positions)
-                masked_lm_ids = tokenizer.convert_tokens_to_ids(instance.masked_lm_labels)
-                masked_lm_weights = [1.0] * len(masked_lm_ids)
+            assert len(input_ids) == max_seq_length
+            assert len(input_mask) == max_seq_length
+            assert len(segment_ids) == max_seq_length
 
-                while len(masked_lm_positions) < max_predictions_per_seq:
-                    masked_lm_positions.append(0)
-                    masked_lm_ids.append(0)
-                    masked_lm_weights.append(0.0)
+            masked_lm_positions = list(masked_lm_positions)
+            masked_lm_ids = tokenizer.convert_tokens_to_ids(masked_lm_labels)
+            masked_lm_weights = [1.0] * len(masked_lm_ids)
 
-                next_sentence_label = 1 if instance.is_random_next else 0
+            while len(masked_lm_positions) < max_predictions_per_seq:
+                masked_lm_positions.append(0)
+                masked_lm_ids.append(0)
+                masked_lm_weights.append(0.0)
 
-                # masked_lm_weights omitted for pytorch, needed for tf features
-                all_input_ids.append(input_ids)
-                all_input_mask.append(input_mask)
-                all_segment_ids.append(segment_ids)
-                all_masked_lm_positions.append(masked_lm_positions)
-                all_masked_lm_ids.append(masked_lm_ids)
-                all_next_sentence_labels.append(next_sentence_label)
+            next_sentence_label = 1 if random_next else 0
+
+            # masked_lm_weights omitted for pytorch, needed for tf features
+            all_input_ids.append(input_ids)
+            all_input_mask.append(input_mask)
+            all_segment_ids.append(segment_ids)
+            all_masked_lm_positions.append(masked_lm_positions)
+            all_masked_lm_ids.append(masked_lm_ids)
+            all_next_sentence_labels.append(next_sentence_label)
 
         return {"input_ids": all_input_ids,
                 "input_mask": all_input_mask,
@@ -431,13 +430,7 @@ class InstanceConverterLambda(object):
                 "masked_lm_positions": all_masked_lm_positions,
                 "masked_lm_ids": all_masked_lm_ids,
                 "next_sentence_labels": all_next_sentence_labels}
-
-
-def cache_name(name: str, args: PreTrainingArguments) -> str:
-    return "_".join([name,
-                     args.tokenizer,
-                     str(args.max_seq_length)])
-
+    
 
 def segment_sentences(docs):
     # batched version
@@ -473,12 +466,10 @@ def main():
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
     logger.info(f"Segmenting pre-training dataset into sentences. Please wait...")
     dataset = dataset.map(segment_sentences, batched=True, remove_columns=dataset.column_names,
-                          cache_file_name=cache_name("first_cache", args),
                           num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Segmented pre-training dataset into sentences, tokenizing sentences...")
     documents = dataset.map(TokenizerLambda(tokenizer), batched=True, remove_columns=dataset.column_names,
-                            cache_file_name=cache_name("second_cache", args),
                             num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
@@ -488,29 +479,33 @@ def main():
                                                             masked_lm_prob=args.masked_lm_prob,
                                                             dupe_factor=args.dupe_factor,
                                                             max_predictions_per_seq=args.max_predictions_per_seq),
-                              cache_file_name=cache_name("third_cache", args),
                               batched=True, remove_columns=documents.column_names,
                               num_proc=args.num_proc if args.num_proc > 0 else None)
 
     show_samples = 3
     logger.info(f"Created {len(instances)} training instances. Here are a {show_samples} samples:")
 
-    for idx, instance in enumerate(instances):
-        if idx >= show_samples:
-            break
+    for idx in range(show_samples):
         logger.info(f"Pre-training instance sample #{idx}:"
-                    f"\ntokens:{str(instance['tokens'][idx])} "
-                    f"\nsegment_ids:{str(instance['segment_ids'][idx])} "
-                    f"\nis_random_next:{str(instance['is_random_next'][idx])} "
-                    f"\nmasked_lm_positions:{str(instance['masked_lm_positions'][idx])} "
-                    f"\nmasked_lm_labels:{str(instance['masked_lm_labels'][idx])}\n")
+                    f"\ntokens:{instances[idx]['input_tokens']} "
+                    f"\nsegment_ids:{str(instances[idx]['segment_ids'])} "
+                    f"\nis_random_next:{str(instances[idx]['is_random_next'])} "
+                    f"\nmasked_lm_positions:{str(instances[idx]['masked_lm_positions'])} "
+                    f"\nmasked_lm_labels:{str(instances[idx]['masked_lm_labels'])}\n")
 
     logger.info(f"Creating dataset of pre-training instances.")
 
+    f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
+                  'input_mask': Sequence(feature=Value(dtype='int32')),
+                  'masked_lm_ids': Sequence(feature=Value(dtype='int32')),
+                  'masked_lm_positions': Sequence(feature=Value(dtype='int32')),
+                  'next_sentence_labels': Value(dtype='int32'),
+                  'segment_ids': Sequence(feature=Value(dtype='int32'))})
+
     pre_training_dataset = instances.map(
         InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
-        cache_file_name=cache_name("fourth_cache", args),
-        batched=True, remove_columns=instances.column_names, num_proc=args.num_proc if args.num_proc > 0 else None)
+        features=f, batched=True, remove_columns=instances.column_names,
+        num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Saving dataset to disk, please wait...")
     pre_training_dataset.save_to_disk(args.output_dataset)
