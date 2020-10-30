@@ -89,32 +89,6 @@ class PreTrainingArguments:
         metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
 
-
-class TrainingInstance(object):
-    """A single training instance (sentence pair)."""
-
-    def __init__(self, tokens, segment_ids, masked_lm_positions, masked_lm_labels,
-                 is_random_next):
-        self.tokens = tokens
-        self.segment_ids = segment_ids
-        self.is_random_next = is_random_next
-        self.masked_lm_positions = masked_lm_positions
-        self.masked_lm_labels = masked_lm_labels
-
-    def __str__(self):
-        s = ""
-        s += "tokens: %s\n" % (" ".join([x for x in self.tokens]))
-        s += "segment_ids: %s\n" % (" ".join([str(x) for x in self.segment_ids]))
-        s += "is_random_next: %s\n" % self.is_random_next
-        s += "masked_lm_positions: %s\n" % (" ".join([str(x) for x in self.masked_lm_positions]))
-        s += "masked_lm_labels: %s\n" % (" ".join([x for x in self.masked_lm_labels]))
-        s += "\n"
-        return s
-
-    def __repr__(self):
-        return self.__str__()
-
-
 class TokenizerLambda(object):
 
     def __init__(self, tokenizer: PreTrainedTokenizer, text_column: str = "text"):
@@ -430,7 +404,7 @@ class InstanceConverterLambda(object):
                 "masked_lm_positions": all_masked_lm_positions,
                 "masked_lm_ids": all_masked_lm_ids,
                 "next_sentence_labels": all_next_sentence_labels}
-    
+
 
 def segment_sentences(docs):
     # batched version
