@@ -89,6 +89,7 @@ class PreTrainingArguments:
         metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
 
+
 class TokenizerLambda(object):
 
     def __init__(self, tokenizer: PreTrainedTokenizer, text_column: str = "text"):
@@ -399,11 +400,11 @@ class InstanceConverterLambda(object):
             all_next_sentence_labels.append(next_sentence_label)
 
         return {"input_ids": all_input_ids,
-                "input_mask": all_input_mask,
-                "segment_ids": all_segment_ids,
+                "attention_mask": all_input_mask,
+                "token_type_ids": all_segment_ids,
                 "masked_lm_positions": all_masked_lm_positions,
-                "masked_lm_ids": all_masked_lm_ids,
-                "next_sentence_labels": all_next_sentence_labels}
+                "labels": all_masked_lm_ids,
+                "next_sentence_label": all_next_sentence_labels}
 
 
 def segment_sentences(docs):
@@ -469,12 +470,13 @@ def main():
 
     logger.info(f"Creating dataset of pre-training instances.")
 
-    f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
-                  'input_mask': Sequence(feature=Value(dtype='int32')),
-                  'masked_lm_ids': Sequence(feature=Value(dtype='int32')),
-                  'masked_lm_positions': Sequence(feature=Value(dtype='int32')),
-                  'next_sentence_labels': Value(dtype='int32'),
-                  'segment_ids': Sequence(feature=Value(dtype='int32'))})
+    f = Features({'input_ids': Sequence(feature=Value(dtype='int64')),
+                  'attention_mask': Sequence(feature=Value(dtype='int64')),
+                  'token_type_ids': Sequence(feature=Value(dtype='int64')),
+                  'masked_lm_positions': Sequence(feature=Value(dtype='int64')),
+                  'labels': Sequence(feature=Value(dtype='int64')),
+                  'next_sentence_label': Value(dtype='int64'),
+                  })
 
     pre_training_dataset = instances.map(
         InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),

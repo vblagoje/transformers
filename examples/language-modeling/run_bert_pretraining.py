@@ -273,8 +273,7 @@ def main():
     logger.info("Preparing bert training dataset...")
     dataset = load_from_disk(data_args.encoded_bert_dataset_path)
     logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
-    dataset.set_format("pytorch", columns=["input_ids", "segment_ids", "input_mask", "masked_lm_ids",
-                                           "next_sentence_labels"])
+    dataset.set_format("pytorch", columns=["input_ids", "segment_ids", "input_mask", "masked_lm_ids", "next_sentence_labels"])
 
     world_size = get_world_size(training_args)
 
