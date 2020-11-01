@@ -16,12 +16,9 @@
 import glob
 import logging
 import os
-from copy import copy
 from typing import Dict, List, Optional, Callable, Tuple, Union
 
-import datasets
 import torch
-import wandb
 from apex.optimizers import FusedLAMB
 from dataclasses import dataclass, field
 from datasets import load_from_disk
@@ -32,22 +29,10 @@ from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
-    set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, DataCollatorForNextSentencePrediction, TrainerCallback,
+    set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, TrainerCallback,
     EvalPrediction, PreTrainedModel, DataCollator, get_polynomial_decay_schedule_with_warmup, )
 
 logger = logging.getLogger(__name__)
-
-
-class DatasetAdapter(Dataset):
-
-    def __init__(self, dataset: datasets.Dataset):
-        self.dataset = dataset
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, i):
-        return self.dataset[i]
 
 
 class BertTrainer(Trainer):
@@ -288,6 +273,8 @@ def main():
     logger.info("Preparing bert training dataset...")
     dataset = load_from_disk(data_args.encoded_bert_dataset_path)
     logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
+    dataset.set_format("pytorch", columns=["input_ids", "segment_ids", "input_mask", "masked_lm_ids",
+                                           "next_sentence_labels"])
 
     world_size = get_world_size(training_args)
 
@@ -296,62 +283,19 @@ def main():
         dataset = dataset.shard(num_shards=world_size, index=rank)
         logger.info(f"Process with rank {rank} got assigned dataset subset of {len(dataset)} samples")
 
-    # never mind the method invocation name (train_test_split), we are just splitting bert pre-training dataset into
-    # two parts, first for phase 1, and second for phase 2
-    bert_training_dataset = dataset.train_test_split(train_size=0.9, test_size=0.1)
-    first_bert_training_dataset = bert_training_dataset["train"]
-    second_bert_training_dataset = bert_training_dataset["test"]
+    training_args.warmup_steps = int(training_args.max_steps *
+                                     training_args.warmup_proportion)
 
-    logger.info(f"First phase pre-training dataset has {len(first_bert_training_dataset)} sequence pairs.")
-    logger.info(f"Second phase pre-training dataset has {len(second_bert_training_dataset)} sequence pairs.")
+    checkpoint_dir = find_checkpoint(training_args)
+    trainer = Trainer(model=model, args=training_args,
+                      train_dataset=dataset,
+                      optimizers=prepare_optimizer_and_scheduler(model, training_args))
+    # checkpoint_dir is ignored if None
+    trainer.train(model_path=checkpoint_dir)
 
-    first_phase_training_args = copy(training_args)
-
-    first_phase_training_args.warmup_steps = int(first_phase_training_args.max_steps *
-                                                 first_phase_training_args.warmup_proportion)
-
-    # Training
-    if training_args.do_train:
-        checkpoint_dir = find_checkpoint(training_args)
-        if training_args.do_phase1_training:
-            if checkpoint_dir:
-                logger.info(f"Training continues from checkpoint {checkpoint_dir}")
-                model = model.from_pretrained(checkpoint_dir)
-                model.train()
-                logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint")
-            else:
-                logger.info(f"Training starts from scratch")
-
-            trainer = Trainer(model=model, args=first_phase_training_args,
-                              data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
-                                                                                  block_size=128),
-                              train_dataset=DatasetAdapter(first_bert_training_dataset),
-                              optimizers=prepare_optimizer_and_scheduler(model, first_phase_training_args))
-            # checkpoint_dir is ignored if None
-            trainer.train(model_path=checkpoint_dir)
-            wandb.finish()  # TODO hide in callback
-
-        if training_args.do_phase2_training:
-            continue_phase_2: bool = checkpoint_dir and not training_args.do_phase1_training
-            if continue_phase_2:
-                logger.info(f"Training phase 2 continues from checkpoint {checkpoint_dir}, please wait...")
-                model = model.from_pretrained(checkpoint_dir)
-                model.train()
-                logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint")
-
-            second_phase_training_args = prepare_second_phase_training_args(copy(training_args))
-            trainer = Trainer(model=model, args=second_phase_training_args,
-                              data_collator=DataCollatorForNextSentencePrediction(tokenizer=tokenizer,
-                                                                                  block_size=512),
-                              train_dataset=DatasetAdapter(second_bert_training_dataset),
-                              optimizers=prepare_optimizer_and_scheduler(model, second_phase_training_args))
-
-            logger.info(f"Starting phase 2, parameters {trainer.args}")
-            trainer.train(model_path=checkpoint_dir if continue_phase_2 else None)
-
-            trainer.save_model()
-            if trainer.is_world_process_zero():
-                tokenizer.save_pretrained(training_args.output_dir)
+    trainer.save_model()
+    if trainer.is_world_process_zero():
+        tokenizer.save_pretrained(training_args.output_dir)
 
 
 def _mp_fn(index):
