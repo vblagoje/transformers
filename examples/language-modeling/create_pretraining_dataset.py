@@ -357,7 +357,7 @@ class InstanceConverterLambda(object):
         """Create new HF dataset from training instances"""
 
         all_input_ids, all_input_mask, all_segment_ids, all_next_sentence_labels, all_masked_lm_positions, \
-        all_masked_lm_ids = [], [], [], [], [], []
+        all_masked_labels = [], [], [], [], [], []
 
         for batch_id, (tokens, segment_ids, masked_lm_positions, masked_lm_labels, random_next) in enumerate(
                 zip(instances['input_tokens'],
@@ -382,12 +382,9 @@ class InstanceConverterLambda(object):
 
             masked_lm_positions = list(masked_lm_positions)
             masked_lm_ids = tokenizer.convert_tokens_to_ids(masked_lm_labels)
-            masked_lm_weights = [1.0] * len(masked_lm_ids)
-
-            while len(masked_lm_positions) < max_predictions_per_seq:
-                masked_lm_positions.append(0)
-                masked_lm_ids.append(0)
-                masked_lm_weights.append(0.0)
+            labels = max_seq_length * [-1]
+            for i in range(len(masked_lm_positions)):
+                labels[masked_lm_positions[i]] = masked_lm_ids[i]
 
             next_sentence_label = 1 if random_next else 0
 
@@ -395,15 +392,13 @@ class InstanceConverterLambda(object):
             all_input_ids.append(input_ids)
             all_input_mask.append(input_mask)
             all_segment_ids.append(segment_ids)
-            all_masked_lm_positions.append(masked_lm_positions)
-            all_masked_lm_ids.append(masked_lm_ids)
+            all_masked_labels.append(labels)
             all_next_sentence_labels.append(next_sentence_label)
 
         return {"input_ids": all_input_ids,
                 "attention_mask": all_input_mask,
                 "token_type_ids": all_segment_ids,
-                "masked_lm_positions": all_masked_lm_positions,
-                "labels": all_masked_lm_ids,
+                "labels": all_masked_labels,
                 "next_sentence_label": all_next_sentence_labels}
 
 
@@ -470,12 +465,11 @@ def main():
 
     logger.info(f"Creating dataset of pre-training instances.")
 
-    f = Features({'input_ids': Sequence(feature=Value(dtype='int64')),
-                  'attention_mask': Sequence(feature=Value(dtype='int64')),
-                  'token_type_ids': Sequence(feature=Value(dtype='int64')),
-                  'masked_lm_positions': Sequence(feature=Value(dtype='int64')),
-                  'labels': Sequence(feature=Value(dtype='int64')),
-                  'next_sentence_label': Value(dtype='int64'),
+    f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
+                  'attention_mask': Sequence(feature=Value(dtype='int8')),
+                  'token_type_ids': Sequence(feature=Value(dtype='int8')),
+                  'labels': Sequence(feature=Value(dtype='int32')),
+                  'next_sentence_label': Value(dtype='int8'),
                   })
 
     pre_training_dataset = instances.map(
