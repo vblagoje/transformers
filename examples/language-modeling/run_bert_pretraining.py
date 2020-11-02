@@ -270,31 +270,29 @@ def main():
         mp.patch_model(model)
         logger.info(f"Model sparsified from {num_parameters} parameters, now has {model.num_parameters()} parameters")
 
-    logger.info("Preparing bert training dataset...")
-    dataset = load_from_disk(data_args.encoded_bert_dataset_path)
-    logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
-    dataset.set_format("pytorch", format_kwargs={"dtype": torch.long})
-
     world_size = get_world_size(training_args)
 
     if world_size > 1:
         rank = torch.distributed.get_rank()
-        dataset = dataset.shard(num_shards=world_size, index=rank)
+        shard_dataset = "_".join([data_args.encoded_bert_dataset_path, rank])
+        logger.info(f"Loading bert training dataset shard {shard_dataset}")
+        dataset = load_from_disk(shard_dataset)
         logger.info(f"Process with rank {rank} got assigned dataset subset of {len(dataset)} samples")
+    else:
+        logger.info("Preparing bert training dataset...")
+        dataset = load_from_disk(data_args.encoded_bert_dataset_path)
+        logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
 
     training_args.warmup_steps = int(training_args.max_steps *
                                      training_args.warmup_proportion)
 
     checkpoint_dir = find_checkpoint(training_args)
-    trainer = Trainer(model=model, args=training_args,
-                      train_dataset=dataset,
+    trainer = Trainer(model=model, args=training_args, train_dataset=dataset,
                       optimizers=prepare_optimizer_and_scheduler(model, training_args))
     # checkpoint_dir is ignored if None
-    trainer.train(model_path=checkpoint_dir)
-
+    trainer_output = trainer.train(model_path=checkpoint_dir)
+    logger.info(f"Training completed {trainer_output}")
     trainer.save_model()
-    if trainer.is_world_process_zero():
-        tokenizer.save_pretrained(training_args.output_dir)
 
 
 def _mp_fn(index):
