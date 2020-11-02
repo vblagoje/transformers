@@ -382,7 +382,7 @@ class InstanceConverterLambda(object):
 
             masked_lm_positions = list(masked_lm_positions)
             masked_lm_ids = tokenizer.convert_tokens_to_ids(masked_lm_labels)
-            labels = max_seq_length * [-1]
+            labels = max_seq_length * [-100]
             for i in range(len(masked_lm_positions)):
                 labels[masked_lm_positions[i]] = masked_lm_ids[i]
 
@@ -474,7 +474,7 @@ def main():
 
     pre_training_dataset = instances.map(
         InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
-        features=f, batched=True, remove_columns=instances.column_names,
+        features=f, batched=True, batch_size=10000, remove_columns=instances.column_names,
         num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Saving dataset to disk, please wait...")
