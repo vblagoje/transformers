@@ -111,6 +111,11 @@ class BertTrainingArguments(TrainingArguments):
     into argparse arguments to be able to specify them on the command line.
     """
 
+    resume_from_checkpoint: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to resume training from checkpoint"}
+    )
+
     warmup_proportion: Optional[float] = field(
         default=0.1,
         metadata={"help": "Proportion of training steps for warmup"}
@@ -287,11 +292,25 @@ def main():
                                      training_args.warmup_proportion)
 
     checkpoint_dir = find_checkpoint(training_args)
+    # Training
+    if training_args.do_phase1_training and training_args.do_phase2_training:
+        raise RuntimeError("Pre-training script has to be invoked for phase 1 or phase 2 of the pre-training, not both")
+
+    logger.info(f"Starting {'phase 1' if training_args.do_phase1_training else 'phase 2'}...")
+    if checkpoint_dir and training_args.resume_from_checkpoint:
+        logger.info(f"Pre-training continues from checkpoint {checkpoint_dir}")
+        model = model.from_pretrained(checkpoint_dir)
+        logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint {checkpoint_dir}")
+    elif training_args.do_phase2_training:
+        model = model.from_pretrained(training_args.output_dir)
+        logger.info(f"Loaded model prom phase 1, having {model.num_parameters()} parameters, continue pre-training")
+
+    training_args.warmup_steps = int(training_args.max_steps *
+                                     training_args.warmup_proportion)
     trainer = Trainer(model=model, args=training_args, train_dataset=dataset,
                       optimizers=prepare_optimizer_and_scheduler(model, training_args))
     # checkpoint_dir is ignored if None
-    trainer_output = trainer.train(model_path=checkpoint_dir)
-    logger.info(f"Training completed {trainer_output}")
+    trainer.train(model_path=checkpoint_dir)
     trainer.save_model()
 
 
