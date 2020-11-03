@@ -153,7 +153,7 @@ class BertTrainingArguments(TrainingArguments):
 
 def get_world_size(args):
     world_size = 1
-    if args.local_rank != -1:
+    if args.local_rank != -1 and torch.distributed.is_initialized():
         world_size = torch.distributed.get_world_size()
     return max(1, world_size)
 
@@ -275,11 +275,11 @@ def main():
     if world_size > 1:
         rank = torch.distributed.get_rank()
         shard_dataset = "_".join([data_args.encoded_bert_dataset_path, rank])
-        logger.info(f"Loading bert training dataset shard {shard_dataset}")
+        logger.info(f"Loading pre-training dataset shard {shard_dataset}")
         dataset = load_from_disk(shard_dataset)
-        logger.info(f"Process with rank {rank} got assigned dataset subset of {len(dataset)} samples")
+        logger.info(f"Process with rank {rank} got assigned dataset shard of {len(dataset)} samples")
     else:
-        logger.info("Preparing bert training dataset...")
+        logger.info("Loading pre-training dataset...")
         dataset = load_from_disk(data_args.encoded_bert_dataset_path)
         logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
 
