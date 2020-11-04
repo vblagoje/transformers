@@ -21,6 +21,7 @@ import random
 from typing import List, Dict, Any, Optional
 
 import nltk
+import numpy as np
 from dataclasses import dataclass, field
 from datasets import load_from_disk, load_dataset, Sequence, Features, Value
 
@@ -357,44 +358,30 @@ class InstanceConverterLambda(object):
     def convert_instances_to_dataset(self, instances):
         """Create new HF dataset from training instances"""
 
-        all_input_ids, all_input_mask, all_segment_ids, all_next_sentence_labels, all_masked_lm_positions, \
-        all_masked_labels = [], [], [], [], [], []
+        num_instances = len(instances["input_tokens"])
+        all_input_ids = np.zeros([num_instances, self.max_seq_length], dtype="int32")
+        all_input_mask = np.zeros([num_instances, self.max_seq_length], dtype="int8")
+        all_segment_ids = np.zeros([num_instances, self.max_seq_length], dtype="int8")
+        all_masked_labels = np.full([num_instances, self.max_seq_length], fill_value=-100, dtype="int32")
+        all_next_sentence_labels = np.zeros(num_instances, dtype="int8")
 
-        for batch_id, (tokens, segment_ids, masked_lm_positions, masked_lm_labels, random_next) in enumerate(
+        for idx, (tokens, segment_ids, masked_lm_positions, masked_lm_labels, random_next) in enumerate(
                 zip(instances['input_tokens'],
                     instances['segment_ids'],
                     instances['masked_lm_positions'],
                     instances['masked_lm_labels'],
                     instances['is_random_next'])):
-
             input_ids = tokens
             input_mask = [1] * len(input_ids)
-            segment_ids = list(segment_ids)
-            assert len(input_ids) <= self.max_seq_length
-
-            while len(input_ids) < self.max_seq_length:
-                input_ids.append(0)
-                input_mask.append(0)
-                segment_ids.append(0)
-
-            assert len(input_ids) == self.max_seq_length
-            assert len(input_mask) == self.max_seq_length
-            assert len(segment_ids) == self.max_seq_length
-
-            masked_lm_positions = list(masked_lm_positions)
-            masked_lm_ids = masked_lm_labels
-            labels = self.max_seq_length * [-100]
-            for i in range(len(masked_lm_positions)):
-                labels[masked_lm_positions[i]] = masked_lm_ids[i]
-
-            next_sentence_label = 1 if random_next else 0
+            masked_labels = np.full([self.max_seq_length, ], -100, dtype="int32")
+            masked_labels[masked_lm_positions] = masked_lm_labels
 
             # masked_lm_weights omitted for pytorch, needed for tf features
-            all_input_ids.append(input_ids)
-            all_input_mask.append(input_mask)
-            all_segment_ids.append(segment_ids)
-            all_masked_labels.append(labels)
-            all_next_sentence_labels.append(next_sentence_label)
+            all_input_ids[idx][:len(tokens)] = tokens
+            all_input_mask[idx][:len(tokens)] = input_mask
+            all_segment_ids[idx][:len(tokens)] = segment_ids
+            all_masked_labels[idx] = masked_labels
+            all_next_sentence_labels[idx] = 1 if random_next else 0
 
         return {"input_ids": all_input_ids,
                 "attention_mask": all_input_mask,
