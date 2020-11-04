@@ -105,11 +105,8 @@ class TokenizerLambda(object):
         # batched version
         outputs = []
         for doc in documents[self.text_column]:
-            tokenized_doc = []
-            for sentence in doc:
-                tokens = self.tokenizer.tokenize(sentence)
-                tokenized_doc.append(tokens)
-            outputs.append(tokenized_doc)
+            doc_encoded = self.tokenizer.batch_encode_plus(doc, add_special_tokens=False)
+            outputs.append(doc_encoded["input_ids"])
         return {'tokens': outputs}
 
 
@@ -247,19 +244,19 @@ class TrainingInstanceFactoryLambda(object):
 
                     tokens = []
                     segment_ids = []
-                    tokens.append("[CLS]")
+                    tokens.append(self.tokenizer.cls_token_id)
                     segment_ids.append(0)
                     for token in tokens_a:
                         tokens.append(token)
                         segment_ids.append(0)
 
-                    tokens.append("[SEP]")
+                    tokens.append(self.tokenizer.sep_token_id)
                     segment_ids.append(0)
 
                     for token in tokens_b:
                         tokens.append(token)
                         segment_ids.append(1)
-                    tokens.append("[SEP]")
+                    tokens.append(self.tokenizer.sep_token_id)
                     segment_ids.append(1)
 
                     (tokens, masked_lm_positions,
@@ -283,7 +280,7 @@ class TrainingInstanceFactoryLambda(object):
 
         cand_indexes = []
         for (i, token) in enumerate(tokens):
-            if token == "[CLS]" or token == "[SEP]":
+            if token == self.tokenizer.cls_token_id or token == self.tokenizer.sep_token_id:
                 continue
             cand_indexes.append(i)
 
@@ -306,14 +303,15 @@ class TrainingInstanceFactoryLambda(object):
             masked_token = None
             # 80% of the time, replace with [MASK]
             if rng.random() < 0.8:
-                masked_token = "[MASK]"
+                masked_token = self.tokenizer.mask_token_id
             else:
                 # 10% of the time, keep original
                 if rng.random() < 0.5:
                     masked_token = tokens[index]
                 # 10% of the time, replace with random word
                 else:
-                    masked_token = vocab_words[rng.randint(0, len(vocab_words) - 1)]
+                    random_token = vocab_words[rng.randint(0, len(vocab_words) - 1)]
+                    masked_token = self.tokenizer.convert_tokens_to_ids(random_token)
 
             output_tokens[index] = masked_token
             masked_lms.append(self.MaskedLmInstance(index=index, label=tokens[index]))
@@ -350,15 +348,13 @@ class InstanceConverterLambda(object):
 
     def __init__(self, tokenizer: PreTrainedTokenizer, max_seq_length: int, max_predictions_per_seq: int):
         self.tokenizer = tokenizer
-        # self.text_column: str = text_column
         self.max_seq_length = max_seq_length
         self.max_predictions_per_seq = max_predictions_per_seq
 
     def __call__(self, documents: List[str]) -> Dict[str, Any]:
-        return self.convert_instances_to_dataset(documents, self.tokenizer,
-                                                 self.max_seq_length, self.max_predictions_per_seq)
+        return self.convert_instances_to_dataset(documents)
 
-    def convert_instances_to_dataset(self, instances, tokenizer, max_seq_length, max_predictions_per_seq):
+    def convert_instances_to_dataset(self, instances):
         """Create new HF dataset from training instances"""
 
         all_input_ids, all_input_mask, all_segment_ids, all_next_sentence_labels, all_masked_lm_positions, \
@@ -371,23 +367,23 @@ class InstanceConverterLambda(object):
                     instances['masked_lm_labels'],
                     instances['is_random_next'])):
 
-            input_ids = tokenizer.convert_tokens_to_ids(tokens)
+            input_ids = tokens
             input_mask = [1] * len(input_ids)
             segment_ids = list(segment_ids)
-            assert len(input_ids) <= max_seq_length
+            assert len(input_ids) <= self.max_seq_length
 
-            while len(input_ids) < max_seq_length:
+            while len(input_ids) < self.max_seq_length:
                 input_ids.append(0)
                 input_mask.append(0)
                 segment_ids.append(0)
 
-            assert len(input_ids) == max_seq_length
-            assert len(input_mask) == max_seq_length
-            assert len(segment_ids) == max_seq_length
+            assert len(input_ids) == self.max_seq_length
+            assert len(input_mask) == self.max_seq_length
+            assert len(segment_ids) == self.max_seq_length
 
             masked_lm_positions = list(masked_lm_positions)
-            masked_lm_ids = tokenizer.convert_tokens_to_ids(masked_lm_labels)
-            labels = max_seq_length * [-100]
+            masked_lm_ids = masked_lm_labels
+            labels = self.max_seq_length * [-100]
             for i in range(len(masked_lm_positions)):
                 labels[masked_lm_positions[i]] = masked_lm_ids[i]
 
@@ -462,11 +458,11 @@ def main():
 
     for idx in range(show_samples):
         logger.info(f"Pre-training instance sample #{idx}:"
-                    f"\ntokens:{instances[idx]['input_tokens']} "
+                    f"\ntokens:{tokenizer.decode(instances[idx]['input_tokens'])} "
                     f"\nsegment_ids:{str(instances[idx]['segment_ids'])} "
                     f"\nis_random_next:{str(instances[idx]['is_random_next'])} "
                     f"\nmasked_lm_positions:{str(instances[idx]['masked_lm_positions'])} "
-                    f"\nmasked_lm_labels:{str(instances[idx]['masked_lm_labels'])}\n")
+                    f"\nmasked_lm_labels:{tokenizer.decode(instances[idx]['masked_lm_labels'])}\n")
 
     logger.info(f"Creating dataset of pre-training instances.")
     f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
