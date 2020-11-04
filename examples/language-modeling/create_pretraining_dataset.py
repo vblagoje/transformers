@@ -64,6 +64,11 @@ class PreTrainingArguments:
         metadata={"help": "Number of processes for multiprocessing. By default it doesn't use multiprocessing."}
     )
 
+    num_shards: Optional[int] = field(
+        default=10,
+        metadata={"help": "Number of shards applied to output dataset"}
+    )
+
     max_predictions_per_seq: Optional[int] = field(
         default=20,
         metadata={"help": "The maximum number of masked tokens per sequence"}
@@ -464,7 +469,6 @@ def main():
                     f"\nmasked_lm_labels:{str(instances[idx]['masked_lm_labels'])}\n")
 
     logger.info(f"Creating dataset of pre-training instances.")
-
     f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
                   'attention_mask': Sequence(feature=Value(dtype='int8')),
                   'token_type_ids': Sequence(feature=Value(dtype='int8')),
@@ -472,14 +476,15 @@ def main():
                   'next_sentence_label': Value(dtype='int8'),
                   })
 
-    pre_training_dataset = instances.map(
-        InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
-        features=f, batched=True, batch_size=10000, remove_columns=instances.column_names,
-        num_proc=args.num_proc if args.num_proc > 0 else None)
-
-    logger.info(f"Saving dataset to disk, please wait...")
-    pre_training_dataset.save_to_disk(args.output_dataset)
-    logger.info(f"Prepared and saved pre-training dataset with {len(pre_training_dataset)} training instances.")
+    for shard_i in range(args.num_shards):
+        instances_shard = instances.shard(num_shards=args.num_shards, index=shard_i)
+        pre_training_dataset = instances_shard.map(
+            InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
+            features=f, batched=True, batch_size=10000, remove_columns=instances.column_names,
+            num_proc=args.num_proc if args.num_proc > 0 else None)
+        logger.info(f"Saving sharded dataset to disk, please wait...")
+        pre_training_dataset.save_to_disk("_".join([args.output_dataset, str(shard_i)]))
+    # logger.info(f"Prepared and saved pre-training dataset with {len(pre_training_dataset)} training instances.")
 
 
 if __name__ == "__main__":
