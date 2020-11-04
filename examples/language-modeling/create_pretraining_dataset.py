@@ -413,7 +413,7 @@ def segment_sentences(docs):
     for doc in docs["text"]:
         sentences = nltk.sent_tokenize(doc)
         if len(sentences) > 1:
-            # remove category and references from the end of articles
+            # remove category and references from the end of wikipedia document
             # TODO cleaning dataset is a better approach
             sentences.pop()
         outputs.append(sentences)
@@ -478,13 +478,15 @@ def main():
 
     for shard_i in range(args.num_shards):
         instances_shard = instances.shard(num_shards=args.num_shards, index=shard_i)
+        logger.info(f"Processing shard {shard_i} with {len(instances_shard)} training instances.")
         pre_training_dataset = instances_shard.map(
             InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
-            features=f, batched=True, batch_size=10000, remove_columns=instances.column_names,
+            features=f, batched=True, remove_columns=instances.column_names,
             num_proc=args.num_proc if args.num_proc > 0 else None)
-        logger.info(f"Saving sharded dataset to disk, please wait...")
-        pre_training_dataset.save_to_disk("_".join([args.output_dataset, str(shard_i)]))
-    # logger.info(f"Prepared and saved pre-training dataset with {len(pre_training_dataset)} training instances.")
+        shard_output_file = "_".join([args.output_dataset, str(shard_i)])
+        logger.info(f"Saving sharded dataset {shard_output_file} to disk.")
+        pre_training_dataset.save_to_disk(shard_output_file)
+    logger.info(f"Completed!")
 
 
 if __name__ == "__main__":
