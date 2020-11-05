@@ -70,6 +70,11 @@ class PreTrainingArguments:
         metadata={"help": "Number of shards applied to output dataset"}
     )
 
+    show_samples: Optional[int] = field(
+        default=3,
+        metadata={"help": "Number of training samples to show/log."}
+    )
+
     max_predictions_per_seq: Optional[int] = field(
         default=20,
         metadata={"help": "The maximum number of masked tokens per sequence"}
@@ -436,16 +441,17 @@ def main():
         logger.info(f"Saving sharded dataset {shard_output_file} to disk.")
         pre_training_dataset.save_to_disk(shard_output_file)
 
-    show_samples = 3
-    logger.info(f"Completed!")
+        if args.show_samples > 0:
+            logger.info(f"Showing {args.show_samples} samples")
+            for idx in range(args.show_samples):
+                labels = [x for x in pre_training_dataset[idx]['labels'] if x > 0]
+                logger.info(f"Pre-training instance sample #{idx}:"
+                            f"\ntokens:{tokenizer.decode(pre_training_dataset[idx]['input_ids'])} "
+                            f"\ntoken_type_ids:{str(pre_training_dataset[idx]['token_type_ids'])} "
+                            f"\nnext_sentence_label:{str(pre_training_dataset[idx]['next_sentence_label'])} "
+                            f"\nlabels:{tokenizer.decode(labels)} \n")
 
-    # for idx in range(show_samples):
-    #     labels = [x for x in instances[idx]['labels'] if x > 0]
-    #     logger.info(f"Pre-training instance sample #{idx}:"
-    #                 f"\ntokens:{tokenizer.decode(instances[idx]['input_ids'])} "
-    #                 f"\ntoken_type_ids:{str(instances[idx]['token_type_ids'])} "
-    #                 f"\nnext_sentence_label:{str(instances[idx]['next_sentence_label'])} "
-    #                 f"\nlabels:{tokenizer.decode(labels)} \n")
+    logger.info(f"Completed!")
 
 
 if __name__ == "__main__":
