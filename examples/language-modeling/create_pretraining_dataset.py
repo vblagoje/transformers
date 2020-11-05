@@ -438,7 +438,7 @@ def main():
             batched=True, features=f, remove_columns=documents.column_names,
             num_proc=args.num_proc if args.num_proc > 0 else None)
         shard_output_file = "_".join([args.output_dataset, str(shard_i)])
-        logger.info(f"Saving sharded dataset {shard_output_file} to disk.")
+        logger.info(f"Saving dataset {shard_output_file} with {len(pre_training_dataset)} samples to disk.")
         pre_training_dataset.save_to_disk(shard_output_file)
 
         if args.show_samples > 0:
