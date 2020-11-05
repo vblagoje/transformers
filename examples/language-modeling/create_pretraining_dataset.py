@@ -111,7 +111,12 @@ class TokenizerLambda(object):
         # batched version
         outputs = []
         for doc in documents[self.text_column]:
-            doc_encoded = self.tokenizer.batch_encode_plus(doc, add_special_tokens=False)
+            sentences = nltk.sent_tokenize(doc)
+            if len(sentences) > 1:
+                # remove category and references from the end of wikipedia document
+                # TODO cleaning dataset is a better approach
+                sentences.pop()
+            doc_encoded = self.tokenizer.batch_encode_plus(sentences, add_special_tokens=False)
             outputs.append(doc_encoded["input_ids"])
         return {'tokens': outputs}
 
@@ -378,19 +383,6 @@ class TrainingInstanceFactoryLambda(object):
                 trunc_tokens.pop()
 
 
-def segment_sentences(docs):
-    # batched version
-    outputs = []
-    for doc in docs["text"]:
-        sentences = nltk.sent_tokenize(doc)
-        if len(sentences) > 1:
-            # remove category and references from the end of wikipedia document
-            # TODO cleaning dataset is a better approach
-            sentences.pop()
-        outputs.append(sentences)
-    return {'text': outputs}
-
-
 def main():
     parser = HfArgumentParser((PreTrainingArguments))
     args, = parser.parse_args_into_dataclasses()
@@ -410,11 +402,7 @@ def main():
         dataset = load_dataset('wikipedia', "20200501.en", split='train')
 
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
-    logger.info(f"Segmenting pre-training dataset into sentences. Please wait...")
-    dataset = dataset.map(segment_sentences, batched=True, remove_columns=dataset.column_names,
-                          num_proc=args.num_proc if args.num_proc > 0 else None)
-
-    logger.info(f"Segmented pre-training dataset into sentences, tokenizing sentences...")
+    logger.info(f"Segmenting pre-training dataset into sentences and encoding. Please wait...")
     documents = dataset.map(TokenizerLambda(tokenizer), batched=True, remove_columns=dataset.column_names,
                             num_proc=args.num_proc if args.num_proc > 0 else None)
 
