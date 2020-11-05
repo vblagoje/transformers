@@ -38,7 +38,7 @@ class PreTrainingArguments:
         metadata={"help": "Input dataset name consisting of text docs used to create LM pre-training features"}
     )
 
-    input_dataset_remote: bool = field(
+    use_remote_input_dataset: bool = field(
         default=False,
         metadata={"help": "If dataset is remote, get it using load_dataset, otherwise load dataset using load_dataset"}
     )
@@ -404,7 +404,7 @@ def main():
 
     tokenizer = BertTokenizerFast.from_pretrained(args.tokenizer)
 
-    if not args.input_dataset_remote:
+    if not args.use_remote_input_dataset:
         dataset = load_from_disk(args.input_dataset)
     else:
         dataset = load_dataset('wikipedia', "20200501.en", split='train')
@@ -427,7 +427,7 @@ def main():
                   })
     for shard_i in range(args.num_shards):
         documents_shard = documents.shard(num_shards=args.num_shards, index=shard_i)
-        logger.info(f"Processing shard {shard_i} with {len(documents_shard)} training instances.")
+        logger.info(f"Processing shard {shard_i} with {len(documents_shard)} documents.")
         pre_training_dataset = documents_shard.map(
             TrainingInstanceFactoryLambda(tokenizer, random_seed=args.random_seed,
                                           max_seq_length=args.max_seq_length,
