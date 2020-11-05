@@ -113,13 +113,14 @@ class TokenizerLambda(object):
 
 class TrainingInstanceFactoryLambda(object):
 
-    def __init__(self, tokenizer: PreTrainedTokenizer, max_seq_length: int,
+    def __init__(self, tokenizer: PreTrainedTokenizer, random_seed: int, max_seq_length: int,
                  short_seq_prob: float, masked_lm_prob: float, max_predictions_per_seq: int, dupe_factor: int,
                  text_column: str = "tokens"):
         self.tokenizer = tokenizer
         # for some reason @dataclass instances are not pickable
         # would use args as a constructor parameter
         # self.args = args
+        self.random_seed = random_seed
         self.max_seq_length = max_seq_length
         self.short_seq_prob = short_seq_prob
         self.masked_lm_prob = masked_lm_prob
@@ -131,11 +132,10 @@ class TrainingInstanceFactoryLambda(object):
 
     def __call__(self, documents: List[str]) -> Dict[str, Any]:
         """Create `TrainingInstance`s from documents."""
-        # rng = random.Random(self.args.random_seed)
-        rng = random.Random(12345)
+        rng = random.Random(self.random_seed)
         # Remove empty documents
-        # all_documents = [x for x in all_documents if x]
-        # rng.shuffle(all_documents)
+        # documents = [x for x in documents if x]
+        # rng.shuffle(documents)
         # print(f"len(documents): {len(documents[self.text_column])}")
         vocab_words = list(self.tokenizer.get_vocab().keys())
         all_tokens, all_segment_ids, all_is_random_next, all_masked_lm_positions, all_masked_lm_labels = [], [], [], [], []
@@ -152,10 +152,38 @@ class TrainingInstanceFactoryLambda(object):
                 all_masked_lm_positions.extend(masked_lm_positions)
                 all_masked_lm_labels.extend(masked_lm_labels)
 
-        return {"input_tokens": all_tokens, "segment_ids": all_segment_ids,
-                "is_random_next": all_is_random_next,
-                "masked_lm_positions": all_masked_lm_positions,
-                "masked_lm_labels": all_masked_lm_labels}
+        return self.convert_instances_to_dataset(all_tokens, all_segment_ids, all_is_random_next,
+                                                 all_masked_lm_positions, all_masked_lm_labels)
+
+    def convert_instances_to_dataset(self, all_tokens, all_segment_ids, all_is_random_next,
+                                     all_masked_lm_positions, all_masked_lm_labels):
+        """Create new HF dataset from training instances"""
+
+        num_instances = len(all_tokens)
+        all_input_ids = np.zeros([num_instances, self.max_seq_length], dtype="int32")
+        all_attention_mask = np.zeros([num_instances, self.max_seq_length], dtype="int8")
+        all_token_type_ids = np.zeros([num_instances, self.max_seq_length], dtype="int8")
+        all_masked_labels = np.full([num_instances, self.max_seq_length], fill_value=-100, dtype="int32")
+        all_next_sentence_labels = np.zeros(num_instances, dtype="int8")
+
+        for idx in range(num_instances):
+            input_ids = all_tokens[idx]
+            input_mask = [1] * len(input_ids)
+            masked_labels = np.full([self.max_seq_length, ], -100, dtype="int32")
+            masked_labels[all_masked_lm_positions[idx]] = all_masked_lm_labels[idx]
+
+            # masked_lm_weights omitted for pytorch, needed for tf features
+            all_input_ids[idx][:len(input_ids)] = input_ids
+            all_attention_mask[idx][:len(input_ids)] = input_mask
+            all_token_type_ids[idx][:len(input_ids)] = all_segment_ids[idx]
+            all_masked_labels[idx] = masked_labels
+            all_next_sentence_labels[idx] = 1 if all_is_random_next[idx] else 0
+
+        return {"input_ids": all_input_ids,
+                "attention_mask": all_attention_mask,
+                "token_type_ids": all_token_type_ids,
+                "labels": all_masked_labels,
+                "next_sentence_label": all_next_sentence_labels}
 
     def create_instances_from_document(self,
                                        all_documents, document_index, max_seq_length, short_seq_prob,
@@ -345,51 +373,6 @@ class TrainingInstanceFactoryLambda(object):
                 trunc_tokens.pop()
 
 
-class InstanceConverterLambda(object):
-
-    def __init__(self, tokenizer: PreTrainedTokenizer, max_seq_length: int, max_predictions_per_seq: int):
-        self.tokenizer = tokenizer
-        self.max_seq_length = max_seq_length
-        self.max_predictions_per_seq = max_predictions_per_seq
-
-    def __call__(self, documents: List[str]) -> Dict[str, Any]:
-        return self.convert_instances_to_dataset(documents)
-
-    def convert_instances_to_dataset(self, instances):
-        """Create new HF dataset from training instances"""
-
-        num_instances = len(instances["input_tokens"])
-        all_input_ids = np.zeros([num_instances, self.max_seq_length], dtype="int32")
-        all_input_mask = np.zeros([num_instances, self.max_seq_length], dtype="int8")
-        all_segment_ids = np.zeros([num_instances, self.max_seq_length], dtype="int8")
-        all_masked_labels = np.full([num_instances, self.max_seq_length], fill_value=-100, dtype="int32")
-        all_next_sentence_labels = np.zeros(num_instances, dtype="int8")
-
-        for idx, (tokens, segment_ids, masked_lm_positions, masked_lm_labels, random_next) in enumerate(
-                zip(instances['input_tokens'],
-                    instances['segment_ids'],
-                    instances['masked_lm_positions'],
-                    instances['masked_lm_labels'],
-                    instances['is_random_next'])):
-            input_ids = tokens
-            input_mask = [1] * len(input_ids)
-            masked_labels = np.full([self.max_seq_length, ], -100, dtype="int32")
-            masked_labels[masked_lm_positions] = masked_lm_labels
-
-            # masked_lm_weights omitted for pytorch, needed for tf features
-            all_input_ids[idx][:len(tokens)] = tokens
-            all_input_mask[idx][:len(tokens)] = input_mask
-            all_segment_ids[idx][:len(tokens)] = segment_ids
-            all_masked_labels[idx] = masked_labels
-            all_next_sentence_labels[idx] = 1 if random_next else 0
-
-        return {"input_ids": all_input_ids,
-                "attention_mask": all_input_mask,
-                "token_type_ids": all_segment_ids,
-                "labels": all_masked_labels,
-                "next_sentence_label": all_next_sentence_labels}
-
-
 def segment_sentences(docs):
     # batched version
     outputs = []
@@ -431,45 +414,38 @@ def main():
                             num_proc=args.num_proc if args.num_proc > 0 else None)
 
     logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
-    instances = documents.map(TrainingInstanceFactoryLambda(tokenizer,
-                                                            max_seq_length=args.max_seq_length,
-                                                            short_seq_prob=args.short_seq_prob,
-                                                            masked_lm_prob=args.masked_lm_prob,
-                                                            dupe_factor=args.dupe_factor,
-                                                            max_predictions_per_seq=args.max_predictions_per_seq),
-                              batched=True, remove_columns=documents.column_names,
-                              num_proc=args.num_proc if args.num_proc > 0 else None)
-
-    show_samples = 3
-    logger.info(f"Created {len(instances)} training instances. Here are a {show_samples} samples:")
-
-    for idx in range(show_samples):
-        logger.info(f"Pre-training instance sample #{idx}:"
-                    f"\ntokens:{tokenizer.decode(instances[idx]['input_tokens'])} "
-                    f"\nsegment_ids:{str(instances[idx]['segment_ids'])} "
-                    f"\nis_random_next:{str(instances[idx]['is_random_next'])} "
-                    f"\nmasked_lm_positions:{str(instances[idx]['masked_lm_positions'])} "
-                    f"\nmasked_lm_labels:{tokenizer.decode(instances[idx]['masked_lm_labels'])}\n")
-
-    logger.info(f"Creating dataset of pre-training instances.")
     f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
                   'attention_mask': Sequence(feature=Value(dtype='int8')),
                   'token_type_ids': Sequence(feature=Value(dtype='int8')),
                   'labels': Sequence(feature=Value(dtype='int32')),
                   'next_sentence_label': Value(dtype='int8'),
                   })
-
     for shard_i in range(args.num_shards):
-        instances_shard = instances.shard(num_shards=args.num_shards, index=shard_i)
-        logger.info(f"Processing shard {shard_i} with {len(instances_shard)} training instances.")
-        pre_training_dataset = instances_shard.map(
-            InstanceConverterLambda(tokenizer, args.max_seq_length, args.max_predictions_per_seq),
-            features=f, batched=True, remove_columns=instances.column_names,
+        documents_shard = documents.shard(num_shards=args.num_shards, index=shard_i)
+        logger.info(f"Processing shard {shard_i} with {len(documents_shard)} training instances.")
+        pre_training_dataset = documents_shard.map(
+            TrainingInstanceFactoryLambda(tokenizer, random_seed=args.random_seed,
+                                          max_seq_length=args.max_seq_length,
+                                          short_seq_prob=args.short_seq_prob,
+                                          masked_lm_prob=args.masked_lm_prob,
+                                          dupe_factor=args.dupe_factor,
+                                          max_predictions_per_seq=args.max_predictions_per_seq),
+            batched=True, features=f, remove_columns=documents.column_names,
             num_proc=args.num_proc if args.num_proc > 0 else None)
         shard_output_file = "_".join([args.output_dataset, str(shard_i)])
         logger.info(f"Saving sharded dataset {shard_output_file} to disk.")
         pre_training_dataset.save_to_disk(shard_output_file)
+
+    show_samples = 3
     logger.info(f"Completed!")
+
+    # for idx in range(show_samples):
+    #     labels = [x for x in instances[idx]['labels'] if x > 0]
+    #     logger.info(f"Pre-training instance sample #{idx}:"
+    #                 f"\ntokens:{tokenizer.decode(instances[idx]['input_ids'])} "
+    #                 f"\ntoken_type_ids:{str(instances[idx]['token_type_ids'])} "
+    #                 f"\nnext_sentence_label:{str(instances[idx]['next_sentence_label'])} "
+    #                 f"\nlabels:{tokenizer.decode(labels)} \n")
 
 
 if __name__ == "__main__":
