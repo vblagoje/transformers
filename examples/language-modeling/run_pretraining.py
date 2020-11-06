@@ -279,7 +279,7 @@ def main():
 
     if world_size > 1:
         rank = torch.distributed.get_rank()
-        shard_dataset = "_".join([data_args.encoded_bert_dataset_path, rank])
+        shard_dataset = "_".join([data_args.encoded_bert_dataset_path, str(rank)])
         logger.info(f"Loading pre-training dataset shard {shard_dataset}")
         dataset = load_from_disk(shard_dataset)
         logger.info(f"Process with rank {rank} got assigned dataset shard of {len(dataset)} samples")
