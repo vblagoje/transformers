@@ -23,6 +23,7 @@ from apex.optimizers import FusedLAMB
 from dataclasses import dataclass, field
 from datasets import load_from_disk
 from pytorch_block_sparse import BlockSparseModelPatcher
+from torch.utils.data import RandomSampler
 from torch.utils.data.dataset import Dataset
 
 from transformers import (
@@ -53,6 +54,10 @@ class BertTrainer(Trainer):
         super(BertTrainer, self).__init__(model, args, data_collator, train_dataset,
                                           eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers,
                                           **kwargs)
+
+    def _get_train_sampler(self) -> Optional[torch.utils.data.sampler.Sampler]:
+        # use RandomSampler not DistributedSampler as we are using dataset shards, one shard per distributed process
+        return RandomSampler(self.train_dataset)
 
 
 @dataclass
@@ -196,7 +201,8 @@ def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer,
     optimizer = FusedLAMB(optimizer_grouped_parameters, lr=args.learning_rate)
     lr_scheduler = get_polynomial_decay_schedule_with_warmup(optimizer=optimizer,
                                                              num_warmup_steps=args.warmup_steps,
-                                                             num_training_steps=args.max_steps)
+                                                             num_training_steps=args.max_steps,
+                                                             power=0.5)
     return optimizer, lr_scheduler
 
 
@@ -307,8 +313,8 @@ def main():
 
     training_args.warmup_steps = int(training_args.max_steps *
                                      training_args.warmup_proportion)
-    trainer = Trainer(model=model, args=training_args, train_dataset=dataset,
-                      optimizers=prepare_optimizer_and_scheduler(model, training_args))
+    trainer = BertTrainer(model=model, args=training_args, train_dataset=dataset,
+                          optimizers=prepare_optimizer_and_scheduler(model, training_args))
     # checkpoint_dir is ignored if None
     trainer.train(model_path=checkpoint_dir)
     trainer.save_model()
