@@ -16,24 +16,88 @@
 import glob
 import logging
 import os
-from typing import Dict, List, Optional, Callable, Tuple, Union
+from typing import Optional, Tuple, List, Dict, Union, Callable
 
+import datasets
 import torch
 from apex.optimizers import FusedLAMB
 from dataclasses import dataclass, field
 from datasets import load_from_disk
 from pytorch_block_sparse import BlockSparseModelPatcher
-from torch.utils.data import RandomSampler
-from torch.utils.data.dataset import Dataset
+from torch.utils.data import RandomSampler, Dataset, DataLoader
 
 from transformers import (
     HfArgumentParser,
     Trainer,
-    TrainingArguments,
-    set_seed, BertConfig, BertTokenizerFast, BertForPreTraining, TrainerCallback,
-    EvalPrediction, PreTrainedModel, DataCollator, get_polynomial_decay_schedule_with_warmup, )
+    TrainingArguments, set_seed, BertConfig, BertTokenizerFast, BertForPreTraining,
+    get_polynomial_decay_schedule_with_warmup, PreTrainedModel, DataCollator, EvalPrediction, TrainerCallback, )
 
 logger = logging.getLogger(__name__)
+
+
+class FastDataLoader(object):
+    """
+    A fast DataLoader that loads batches of training examples directly from HF dataset
+    """
+
+    def __init__(self, dataset, batch_size=32, shuffle=False):
+        """
+        Initialize a FastDataLoader.
+
+        :param dataset: pre-processed dataset with input examples.
+        :param batch_size: batch size to load.
+        :param shuffle: if True, shuffle the data *in-place* whenever an
+            iterator is created out of this object.
+
+        :returns: A FastDataLoader.
+        """
+        self.dataset = dataset
+        self.dataset.set_format(**{'type': 'torch', 'format_kwargs': {'dtype': torch.long}})
+        self.i = 0
+        self.dataset_len = len(dataset)
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+        # Calculate # batches
+        n_batches, remainder = divmod(self.dataset_len, self.batch_size)
+        if remainder > 0:
+            n_batches += 1
+        self.n_batches = n_batches
+
+    def __iter__(self):
+        if self.shuffle:
+            self.dataset = self.dataset.shuffle()
+        self.i = 0
+        return self
+
+    def __next__(self):
+        if self.i >= self.dataset_len:
+            raise StopIteration
+        batch = self.dataset[self.i:self.i + self.batch_size]
+        self.i += self.batch_size
+        return batch
+
+    def __len__(self):
+        return self.n_batches
+
+
+class DatasetAdapter(torch.utils.data.Dataset):
+
+    def __init__(self, dataset: datasets.Dataset):
+        """Reads source and target sequences from txt files."""
+        self.dataset = dataset
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        logger.info(f"fetched index {index}")
+        item = self.dataset[index]
+        return {"input_ids": torch.tensor(item["input_ids"], dtype=torch.long),
+                "token_type_ids": torch.tensor(item["token_type_ids"], dtype=torch.long),
+                "attention_mask": torch.tensor(item["attention_mask"], dtype=torch.long),
+                "labels": torch.tensor(item["labels"], dtype=torch.long),
+                "next_sentence_label": torch.tensor(item["next_sentence_label"], dtype=torch.long)}
 
 
 class BertTrainer(Trainer):
@@ -58,6 +122,10 @@ class BertTrainer(Trainer):
     def _get_train_sampler(self) -> Optional[torch.utils.data.sampler.Sampler]:
         # use RandomSampler not DistributedSampler as we are using dataset shards, one shard per distributed process
         return RandomSampler(self.train_dataset)
+
+    def get_train_dataloader(self) -> DataLoader:
+        return FastDataLoader(self.train_dataset,
+                              batch_size=self.args.train_batch_size)
 
 
 @dataclass
