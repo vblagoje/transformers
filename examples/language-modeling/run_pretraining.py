@@ -63,6 +63,12 @@ class ModelArguments:
         default="bert-tiny",
         metadata={"help": "Model name [bert-tiny, bert-mini, bert-small, bert=medium, bert-base]"},
     )
+
+    config_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "Model config file"},
+    )
+
     tokenizer_name: Optional[str] = field(
         default='bert-base-uncased',
         metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
@@ -83,9 +89,9 @@ class DataTrainingArguments:
     """
     Arguments pertaining to what data we are going to input our model for training
     """
-    encoded_bert_dataset_path: Optional[str] = field(
-        default="encoded_bert_dataset",
-        metadata={"help": "An optional parameter specifying path to encoded bert dataset to use in training."},
+    input_dir: Optional[str] = field(
+        default="phase1",
+        metadata={"help": "Path to input data directory"},
     )
 
     block_size: int = field(
@@ -194,6 +200,28 @@ class BertTrainer(Trainer):
                           num_workers=self.args.num_workers)
 
 
+def get_bert_model_config(config_name: str) -> BertConfig:
+    # Let's define only the main models using L/H tuples
+    # <p>BERT Miniatures is the set of 24 BERT models referenced in
+    # <a href="https://arxiv.org/abs/1908.08962">Well-Read Students Learn Better: On the Importance of
+    # Pre-training Compact Models</a> (English only, uncased, trained with WordPiece masking).</p>
+    #
+    # The L and H in the table below stand for the numbers of transformer layers (L) and hidden
+    # embedding sizes (H). The numberof self-attention heads is set to H/64 and the feed-forward/filter
+    # size to 4*H.
+    bert_configs = {"bert-tiny": (2, 128),
+                    "bert-mini": (4, 256),
+                    "bert-small": (4, 512),
+                    "bert-medium": (8, 512),
+                    "bert-base": (12, 768)}
+
+    # and select the model to train
+    l = bert_configs[config_name][0]
+    h = bert_configs[config_name][1]
+    return BertConfig(hidden_size=h, num_attention_heads=int(h / 64), num_hidden_layers=l,
+                      intermediate_size=4 * h)
+
+
 def get_world_size(args):
     world_size = 1
     if args.local_rank != -1 and torch.distributed.is_initialized():
@@ -277,33 +305,21 @@ def main():
     # Set seed
     set_seed(training_args.seed)
 
-    # Let's define only the main models using L/H tuples
-    # <p>BERT Miniatures is the set of 24 BERT models referenced in
-    # <a href="https://arxiv.org/abs/1908.08962">Well-Read Students Learn Better: On the Importance of
-    # Pre-training Compact Models</a> (English only, uncased, trained with WordPiece masking).</p>
-    #
-    # The L and H in the table below stand for the numbers of transformer layers (L) and hidden
-    # embedding sizes (H). The numberof self-attention heads is set to H/64 and the feed-forward/filter
-    # size to 4*H.
-    bert_configs = {"bert-tiny": (2, 128),
-                    "bert-mini": (4, 256),
-                    "bert-small": (4, 512),
-                    "bert-medium": (8, 512),
-                    "bert-base": (12, 768)}
+    bert_config: BertConfig = None
+    if model_args.config_file:
+        bert_config = BertConfig.from_json_file(model_args.config_file)
+    elif model_args.model_name:
+        bert_config = get_bert_model_config(model_args.model_name)
+    else:
+        bert_config = get_bert_model_config("bert-tiny")
 
-    # and select the model to train
-    l = bert_configs[model_args.model_name][0]
-    h = bert_configs[model_args.model_name][1]
-    config = BertConfig(hidden_size=h, num_attention_heads=int(h / 64), num_hidden_layers=l,
-                        intermediate_size=4 * h)
-
-    logger.info(f"Instantiating a new config instance {config}")
+    logger.info(f"Instantiating a new config instance {bert_config}")
 
     # Fast tokenizer helps a lot with the speed of encoding
     tokenizer = BertTokenizerFast.from_pretrained(model_args.tokenizer_name)
 
     # fresh MLM/NSP model
-    model = BertForPreTraining(config)
+    model = BertForPreTraining(bert_config)
 
     if model_args.sparse_model:
         num_parameters = model.num_parameters()
@@ -318,13 +334,15 @@ def main():
 
     if world_size > 1:
         rank = torch.distributed.get_rank()
-        shard_dataset = "_".join([data_args.encoded_bert_dataset_path, str(rank)])
-        logger.info(f"Loading pre-training dataset shard {shard_dataset}")
-        dataset = load_from_disk(shard_dataset)
+        shard_dataset_path = "_".join(["shard", str(rank)])
+        shard_dataset_path = os.path.join(data_args.input_dir, shard_dataset_path)
+        logger.info(f"Loading pre-training dataset shard {shard_dataset_path}")
+        dataset = load_from_disk(shard_dataset_path)
         logger.info(f"Process with rank {rank} got assigned dataset shard of {len(dataset)} samples")
     else:
         logger.info("Loading pre-training dataset...")
-        dataset = load_from_disk(data_args.encoded_bert_dataset_path)
+        dataset_path = os.path.join(data_args.input_dir, "encoded_bert_input_dataset")
+        dataset = load_from_disk(dataset_path)
         logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
 
     training_args.warmup_steps = int(training_args.max_steps *

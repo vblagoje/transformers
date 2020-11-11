@@ -14,7 +14,8 @@
 # limitations under the License.
 
 echo "Container nvidia build = " $NVIDIA_BUILD_ID
-train_batch_size=${1:-256}
+CODEDIR=${24:-${PWD}}
+train_batch_size=${1:-2}
 learning_rate=${2:-"6e-3"}
 precision=${3:-"fp16"}
 num_gpus=${4:-8}
@@ -24,7 +25,7 @@ save_checkpoint_steps=${7:-200}
 resume_training=${8:-"false"}
 create_logfile=${9:-"true"}
 accumulate_gradients=${10:-"true"}
-gradient_accumulation_steps=${11:-32}
+gradient_accumulation_steps=${11:-2}
 seed=${12:-12439}
 job_name=${13:-"bert_lamb_pretraining"}
 allreduce_post_accumulation=${14:-"true"}
@@ -34,12 +35,9 @@ learning_rate_phase2=${17:-"4e-3"}
 warmup_proportion_phase2=${18:-"0.128"}
 train_steps_phase2=${19:-1563}
 gradient_accumulation_steps_phase2=${20:-16}
-DATASET="data/128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5"
-DATA_DIR_PHASE1=${21:-${DATASET}/}
-BERT_CONFIG=${22:-"/workspace/bert/model_config/BERT-tiny/bert_config.json"}
-DATASET2="data/512_max_pred_80_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5"
-DATA_DIR_PHASE2=${23:-${DATASET2}/}
-CODEDIR=${24:-${PWD}/}"}
+DATA_DIR_PHASE1=${21:-${CODEDIR}/data_phase1}
+BERT_CONFIG=${22:-"${CODEDIR}/bert_configs/bert-mini.json"}
+DATA_DIR_PHASE2=${23:-${CODEDIR}/data_phase2}
 init_checkpoint=${25:-"None"}
 RESULTS_DIR=$CODEDIR/results
 CHECKPOINTS_DIR=$RESULTS_DIR/checkpoints
@@ -49,59 +47,58 @@ wandb_run_id=${30:-"None"}
 
 mkdir -p $CHECKPOINTS_DIR
 
-
-if [ ! -d "$DATA_DIR_PHASE1" ] ; then
-   echo "Warning! $DATA_DIR_PHASE1 directory missing. Training cannot start"
+if [ ! -d "$DATA_DIR_PHASE1" ]; then
+  echo "Warning! $DATA_DIR_PHASE1 directory missing. Training cannot start"
 fi
-if [ ! -d "$RESULTS_DIR" ] ; then
-   echo "Error! $RESULTS_DIR directory missing."
-   exit -1
+if [ ! -d "$RESULTS_DIR" ]; then
+  echo "Error! $RESULTS_DIR directory missing."
+  exit -1
 fi
-if [ ! -d "$CHECKPOINTS_DIR" ] ; then
-   echo "Warning! $CHECKPOINTS_DIR directory missing."
-   echo "Checkpoints will be written to $RESULTS_DIR instead."
-   CHECKPOINTS_DIR=$RESULTS_DIR
+if [ ! -d "$CHECKPOINTS_DIR" ]; then
+  echo "Warning! $CHECKPOINTS_DIR directory missing."
+  echo "Checkpoints will be written to $RESULTS_DIR instead."
+  CHECKPOINTS_DIR=$RESULTS_DIR
 fi
-if [ ! -f "$BERT_CONFIG" ] ; then
-   echo "Error! BERT large configuration file not found at $BERT_CONFIG"
-   exit -1
+if [ ! -f "$BERT_CONFIG" ]; then
+  echo "Error! BERT large configuration file not found at $BERT_CONFIG"
+  exit -1
 fi
 
 PREC=""
-if [ "$precision" = "fp16" ] ; then
-   PREC="--fp16"
-elif [ "$precision" = "fp32" ] ; then
-   PREC=""
-elif [ "$precision" = "tf32" ] ; then
-   PREC=""
+if [ "$precision" = "fp16" ]; then
+  PREC="--fp16"
+elif [ "$precision" = "fp32" ]; then
+  PREC=""
+elif [ "$precision" = "tf32" ]; then
+  PREC=""
 else
-   echo "Unknown <precision> argument"
-   exit -2
+  echo "Unknown <precision> argument"
+  exit -2
 fi
 
 ACCUMULATE_GRADIENTS=""
-if [ "$accumulate_gradients" == "true" ] ; then
-   ACCUMULATE_GRADIENTS="--gradient_accumulation_steps=$gradient_accumulation_steps"
+if [ "$accumulate_gradients" == "true" ]; then
+  ACCUMULATE_GRADIENTS="--gradient_accumulation_steps=$gradient_accumulation_steps"
 fi
 
 CHECKPOINT=""
-if [ "$resume_training" == "true" ] ; then
-   CHECKPOINT="--resume_from_checkpoint"
+if [ "$resume_training" == "true" ]; then
+  CHECKPOINT="--resume_from_checkpoint"
 fi
 
 ALL_REDUCE_POST_ACCUMULATION=""
-if [ "$allreduce_post_accumulation" == "true" ] ; then
-   ALL_REDUCE_POST_ACCUMULATION="--allreduce_post_accumulation"
+if [ "$allreduce_post_accumulation" == "true" ]; then
+  ALL_REDUCE_POST_ACCUMULATION="--allreduce_post_accumulation"
 fi
 
 ALL_REDUCE_POST_ACCUMULATION_FP16=""
-if [ "$allreduce_post_accumulation_fp16" == "true" ] ; then
-   ALL_REDUCE_POST_ACCUMULATION_FP16="--allreduce_post_accumulation_fp16"
+if [ "$allreduce_post_accumulation_fp16" == "true" ]; then
+  ALL_REDUCE_POST_ACCUMULATION_FP16="--allreduce_post_accumulation_fp16"
 fi
 
 INIT_CHECKPOINT=""
-if [ "$init_checkpoint" != "None" ] ; then
-   INIT_CHECKPOINT="--init_checkpoint=$init_checkpoint"
+if [ "$init_checkpoint" != "None" ]; then
+  INIT_CHECKPOINT="--init_checkpoint=$init_checkpoint"
 fi
 
 echo $DATA_DIR_PHASE1
@@ -110,11 +107,10 @@ CMD=" $CODEDIR/run_pretraining.py"
 CMD+=" --input_dir=$DATA_DIR_PHASE1"
 CMD+=" --output_dir=$CHECKPOINTS_DIR"
 CMD+=" --config_file=$BERT_CONFIG"
-CMD+=" --bert_model=bert-large-uncased"
-CMD+=" --train_batch_size=$train_batch_size"
+CMD+=" --per_device_train_batch_size=$train_batch_size"
 CMD+=" --max_steps=$train_steps"
 CMD+=" --warmup_proportion=$warmup_proportion"
-CMD+=" --num_steps_per_checkpoint=$save_checkpoint_steps"
+CMD+=" --save_steps=$save_checkpoint_steps"
 CMD+=" --learning_rate=$learning_rate"
 CMD+=" --seed=$seed"
 CMD+=" --logging_steps=10"
@@ -122,34 +118,28 @@ CMD+=" --save_total_limit=1"
 CMD+=" $PREC"
 CMD+=" $ACCUMULATE_GRADIENTS"
 CMD+=" $CHECKPOINT"
-CMD+=" $ALL_REDUCE_POST_ACCUMULATION"
-CMD+=" $ALL_REDUCE_POST_ACCUMULATION_FP16"
 CMD+=" $INIT_CHECKPOINT"
 CMD+=" --do_train"
 CMD+=" --do_phase1_training"
-CMD+=" --json-summary ${RESULTS_DIR}/dllogger.json "
 
-CMD+=" --wandb_project_name=$wandb_project_name "
-CMD+=" --wandb_run_id=$wandb_run_id "
+#CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus --master_port $MASTER_PORT $CMD"
+CMD="python3 $CMD"
 
-CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus --master_port $MASTER_PORT $CMD"
-
-
-if [ "$create_logfile" = "true" ] ; then
+if [ "$create_logfile" = "true" ]; then
   export GBS=$(expr $train_batch_size \* $num_gpus)
   printf -v TAG "pyt_bert_pretraining_phase1_%s_gbs%d" "$precision" $GBS
-  DATESTAMP=`date +'%y%m%d%H%M%S'`
+  DATESTAMP=$(date +'%y%m%d%H%M%S')
   LOGFILE=$RESULTS_DIR/$job_name.$TAG.$DATESTAMP.log
   printf "Logs written to %s\n" "$LOGFILE"
 fi
 
 set -x
-if [ -z "$LOGFILE" ] ; then
-   echo $CMD
+if [ -z "$LOGFILE" ]; then
+  $CMD
 else
-   (
-     echo $CMD
-   )
+  (
+    $CMD
+  )
 fi
 
 set +x
@@ -159,30 +149,30 @@ echo "finished pretraining"
 #Start Phase2
 
 PREC=""
-if [ "$precision" = "fp16" ] ; then
-   PREC="--fp16"
-elif [ "$precision" = "fp32" ] ; then
-   PREC=""
-elif [ "$precision" = "tf32" ] ; then
-   PREC=""
+if [ "$precision" = "fp16" ]; then
+  PREC="--fp16"
+elif [ "$precision" = "fp32" ]; then
+  PREC=""
+elif [ "$precision" = "tf32" ]; then
+  PREC=""
 else
-   echo "Unknown <precision> argument"
-   exit -2
+  echo "Unknown <precision> argument"
+  exit -2
 fi
 
 ACCUMULATE_GRADIENTS=""
-if [ "$accumulate_gradients" == "true" ] ; then
-   ACCUMULATE_GRADIENTS="--gradient_accumulation_steps=$gradient_accumulation_steps_phase2"
+if [ "$accumulate_gradients" == "true" ]; then
+  ACCUMULATE_GRADIENTS="--gradient_accumulation_steps=$gradient_accumulation_steps_phase2"
 fi
 
 ALL_REDUCE_POST_ACCUMULATION=""
-if [ "$allreduce_post_accumulation" == "true" ] ; then
-   ALL_REDUCE_POST_ACCUMULATION="--allreduce_post_accumulation"
+if [ "$allreduce_post_accumulation" == "true" ]; then
+  ALL_REDUCE_POST_ACCUMULATION="--allreduce_post_accumulation"
 fi
 
 ALL_REDUCE_POST_ACCUMULATION_FP16=""
-if [ "$allreduce_post_accumulation_fp16" == "true" ] ; then
-   ALL_REDUCE_POST_ACCUMULATION_FP16="--allreduce_post_accumulation_fp16"
+if [ "$allreduce_post_accumulation_fp16" == "true" ]; then
+  ALL_REDUCE_POST_ACCUMULATION_FP16="--allreduce_post_accumulation_fp16"
 fi
 
 echo $DATA_DIR_PHASE2
@@ -215,21 +205,21 @@ CMD+=" --wandb_run_id=$wandb_run_id "
 
 CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus --master_port $MASTER_PORT $CMD"
 
-if [ "$create_logfile" = "true" ] ; then
+if [ "$create_logfile" = "true" ]; then
   export GBS=$(expr $train_batch_size_phase2 \* $num_gpus)
   printf -v TAG "pyt_bert_pretraining_phase2_%s_gbs%d" "$precision" $GBS
-  DATESTAMP=`date +'%y%m%d%H%M%S'`
+  DATESTAMP=$(date +'%y%m%d%H%M%S')
   LOGFILE=$RESULTS_DIR/$job_name.$TAG.$DATESTAMP.log
   printf "Logs written to %s\n" "$LOGFILE"
 fi
 
 set -x
-if [ -z "$LOGFILE" ] ; then
-   echo $CMD
+if [ -z "$LOGFILE" ]; then
+  echo $CMD
 else
-   (
-     echo $CMD
-   )
+  (
+    echo $CMD
+  )
 fi
 
 set +x
