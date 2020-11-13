@@ -200,6 +200,14 @@ class BertTrainer(Trainer):
                           num_workers=self.args.num_workers)
 
 
+def sparsify_model(model: PreTrainedModel, args: ModelArguments) -> PreTrainedModel:
+    model = model.cuda()  # for some reason we have to do sparsification on cuda
+    mp = BlockSparseModelPatcher()
+    mp.add_pattern("bert\.encoder\.layer\.[0-9]+\.intermediate\.dense", {"density": args.sparse_density})
+    mp.add_pattern("bert\.encoder\.layer\.[0-9]+\.output\.dense", {"density": args.sparse_density})
+    mp.patch_model(model)
+    return model
+
 def get_bert_model_config(config_name: str) -> BertConfig:
     # Let's define only the main models using L/H tuples
     # <p>BERT Miniatures is the set of 24 BERT models referenced in
@@ -323,11 +331,7 @@ def main():
 
     if model_args.sparse_model:
         num_parameters = model.num_parameters()
-        model = model.cuda()  # for some reason we have to do sparsification on cuda
-        mp = BlockSparseModelPatcher()
-        mp.add_pattern("bert\.encoder\.layer\.[0-9]+\.intermediate\.dense", {"density": model_args.sparse_density})
-        mp.add_pattern("bert\.encoder\.layer\.[0-9]+\.output\.dense", {"density": model_args.sparse_density})
-        mp.patch_model(model)
+        model = sparsify_model(model, model_args)
         logger.info(f"Model sparsified from {num_parameters} parameters, now has {model.num_parameters()} parameters")
 
     world_size = get_world_size(training_args)
@@ -359,7 +363,8 @@ def main():
         model = model.from_pretrained(checkpoint_dir)
         logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint {checkpoint_dir}")
     elif training_args.do_phase2_training:
-        model = model.from_pretrained(training_args.output_dir)
+        model_state = torch.load(os.path.join(training_args.output_dir, "pytorch_model.bin"))
+        model.load_state_dict(model_state)
         logger.info(f"Loaded model prom phase 1, having {model.num_parameters()} parameters, continue pre-training")
 
     training_args.warmup_steps = int(training_args.max_steps *
