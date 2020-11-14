@@ -17,6 +17,7 @@
 """Create masked LM/next sentence masked_lm dataset for BERT."""
 import collections
 import logging
+import os
 import random
 from typing import List, Dict, Any, Optional
 
@@ -55,18 +56,23 @@ class PreTrainingArguments:
                           "than this will be padded."}
     )
 
+    document_size_threshold: Optional[int] = field(
+        default=4,
+        metadata={"help": "Minimum required number of sentences in document"}
+    )
+
     dupe_factor: Optional[int] = field(
         default=2,
         metadata={"help": "Number of times to duplicate the input data (with different masks)."}
     )
 
     num_proc: Optional[int] = field(
-        default=0,
+        default=-1,
         metadata={"help": "Number of processes for multiprocessing. By default it doesn't use multiprocessing."}
     )
 
     num_shards: Optional[int] = field(
-        default=10,
+        default=8,
         metadata={"help": "Number of shards applied to output dataset"}
     )
 
@@ -103,8 +109,9 @@ class PreTrainingArguments:
 
 class TokenizerLambda(object):
 
-    def __init__(self, tokenizer: PreTrainedTokenizer, text_column: str = "text"):
+    def __init__(self, tokenizer: PreTrainedTokenizer, threshold_size: int, text_column: str = "text"):
         self.tokenizer = tokenizer
+        self.threshold_size = threshold_size
         self.text_column: str = text_column
 
     def __call__(self, documents: List[str]) -> Dict[str, Any]:
@@ -116,8 +123,10 @@ class TokenizerLambda(object):
                 # remove category and references from the end of wikipedia document
                 # TODO cleaning dataset is a better approach
                 sentences.pop()
-            doc_encoded = self.tokenizer.batch_encode_plus(sentences, add_special_tokens=False)
-            outputs.append(doc_encoded["input_ids"])
+            if len(sentences) > self.threshold_size:
+                doc_encoded = self.tokenizer.batch_encode_plus(sentences, add_special_tokens=False,
+                                                               return_token_type_ids=False, return_attention_mask=False)
+                outputs.append(doc_encoded["input_ids"])
         return {'tokens': outputs}
 
 
@@ -143,10 +152,6 @@ class TrainingInstanceFactoryLambda(object):
     def __call__(self, documents: List[str]) -> Dict[str, Any]:
         """Create `TrainingInstance`s from documents."""
         rng = random.Random(self.random_seed)
-        # Remove empty documents
-        # documents = [x for x in documents if x]
-        # rng.shuffle(documents)
-        # print(f"len(documents): {len(documents[self.text_column])}")
         vocab_words = list(self.tokenizer.get_vocab().keys())
         all_tokens, all_segment_ids, all_is_random_next, all_masked_lm_positions, all_masked_lm_labels = [], [], [], [], []
 
@@ -393,6 +398,9 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
+    cpu_count = args.num_proc if args.num_proc > 0 else os.cpu_count()
+    cpu_count = cpu_count if cpu_count > 0 else 1
+    logger.info(f"Using {cpu_count} cpus for data processing")
 
     tokenizer = BertTokenizerFast.from_pretrained(args.tokenizer)
 
@@ -403,9 +411,11 @@ def main():
 
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
     logger.info(f"Segmenting pre-training dataset into sentences and encoding. Please wait...")
-    documents = dataset.map(TokenizerLambda(tokenizer), batched=True, remove_columns=dataset.column_names,
-                            num_proc=args.num_proc if args.num_proc > 0 else None)
-
+    documents = dataset.map(TokenizerLambda(tokenizer, args.document_size_threshold), batched=True,
+                            remove_columns=dataset.column_names,
+                            num_proc=cpu_count)
+    # shuffle documents
+    documents = documents.shuffle(args.random_seed)
     logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
     f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
                   'attention_mask': Sequence(feature=Value(dtype='int8')),
@@ -424,8 +434,11 @@ def main():
                                           dupe_factor=args.dupe_factor,
                                           max_predictions_per_seq=args.max_predictions_per_seq),
             batched=True, features=f, remove_columns=documents.column_names,
-            num_proc=args.num_proc if args.num_proc > 0 else None)
+            num_proc=cpu_count)
         shard_output_file = "_".join([args.output_dataset, str(shard_i)])
+        # shuffle all training instance
+        logger.info(f"Shuffling {len(pre_training_dataset)} samples.")
+        pre_training_dataset = pre_training_dataset.shuffle(args.random_seed)
         logger.info(f"Saving dataset {shard_output_file} with {len(pre_training_dataset)} samples to disk.")
         pre_training_dataset.save_to_disk(shard_output_file)
 
