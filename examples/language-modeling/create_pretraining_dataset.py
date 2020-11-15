@@ -109,8 +109,9 @@ class PreTrainingArguments:
 
 class TokenizerLambda(object):
 
-    def __init__(self, tokenizer: PreTrainedTokenizer, threshold_size: int, text_column: str = "text"):
+    def __init__(self, tokenizer: PreTrainedTokenizer, rng: random.Random, threshold_size: int, text_column: str = "text"):
         self.tokenizer = tokenizer
+        self.rng = rng
         self.threshold_size = threshold_size
         self.text_column: str = text_column
 
@@ -127,19 +128,21 @@ class TokenizerLambda(object):
                 doc_encoded = self.tokenizer.batch_encode_plus(sentences, add_special_tokens=False,
                                                                return_token_type_ids=False, return_attention_mask=False)
                 outputs.append(doc_encoded["input_ids"])
+        self.rng.shuffle(outputs)
         return {'tokens': outputs}
 
 
 class TrainingInstanceFactoryLambda(object):
 
-    def __init__(self, tokenizer: PreTrainedTokenizer, random_seed: int, max_seq_length: int,
-                 short_seq_prob: float, masked_lm_prob: float, max_predictions_per_seq: int, dupe_factor: int,
-                 text_column: str = "tokens"):
+    def __init__(self, tokenizer: PreTrainedTokenizer, rng: random.Random, rns: np.random.RandomState,
+                 max_seq_length: int, short_seq_prob: float, masked_lm_prob: float, max_predictions_per_seq: int,
+                 dupe_factor: int, text_column: str = "tokens"):
         self.tokenizer = tokenizer
         # for some reason @dataclass instances are not pickable
         # would use args as a constructor parameter
         # self.args = args
-        self.random_seed = random_seed
+        self.rng = rng
+        self.rns = rns
         self.max_seq_length = max_seq_length
         self.short_seq_prob = short_seq_prob
         self.masked_lm_prob = masked_lm_prob
@@ -151,7 +154,6 @@ class TrainingInstanceFactoryLambda(object):
 
     def __call__(self, documents: List[str]) -> Dict[str, Any]:
         """Create `TrainingInstance`s from documents."""
-        rng = random.Random(self.random_seed)
         vocab_words = list(self.tokenizer.get_vocab().keys())
         all_tokens, all_segment_ids, all_is_random_next, all_masked_lm_positions, all_masked_lm_labels = [], [], [], [], []
 
@@ -159,7 +161,7 @@ class TrainingInstanceFactoryLambda(object):
             for document_index in range(len(documents[self.text_column])):
                 tokens, segment_ids, is_random_next, masked_lm_positions, masked_lm_labels = self.create_instances_from_document(
                     documents[self.text_column], document_index, self.max_seq_length, self.short_seq_prob,
-                    self.masked_lm_prob, self.max_predictions_per_seq, vocab_words, rng)
+                    self.masked_lm_prob, self.max_predictions_per_seq, vocab_words, self.rng)
 
                 all_tokens.extend(tokens)
                 all_segment_ids.extend(segment_ids)
@@ -194,11 +196,12 @@ class TrainingInstanceFactoryLambda(object):
             all_masked_labels[idx] = masked_labels
             all_next_sentence_labels[idx] = 1 if all_is_random_next[idx] else 0
 
-        return {"input_ids": all_input_ids,
-                "attention_mask": all_attention_mask,
-                "token_type_ids": all_token_type_ids,
-                "labels": all_masked_labels,
-                "next_sentence_label": all_next_sentence_labels}
+        p = self.rns.permutation(len(all_input_ids))
+        return {"input_ids": all_input_ids[p],
+                "attention_mask": all_attention_mask[p],
+                "token_type_ids": all_token_type_ids[p],
+                "labels": all_masked_labels[p],
+                "next_sentence_label": all_next_sentence_labels[p]}
 
     def create_instances_from_document(self,
                                        all_documents, document_index, max_seq_length, short_seq_prob,
@@ -392,6 +395,9 @@ def main():
     parser = HfArgumentParser((PreTrainingArguments))
     args, = parser.parse_args_into_dataclasses()
 
+    rng = random.Random(args.random_seed)
+    rns = np.random.RandomState(seed=args.random_seed)
+
     # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -411,11 +417,9 @@ def main():
 
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
     logger.info(f"Segmenting pre-training dataset into sentences and encoding. Please wait...")
-    documents = dataset.map(TokenizerLambda(tokenizer, args.document_size_threshold), batched=True,
+    documents = dataset.map(TokenizerLambda(tokenizer, rng, args.document_size_threshold), batched=True,
                             remove_columns=dataset.column_names,
                             num_proc=cpu_count)
-    # shuffle documents
-    documents = documents.shuffle(args.random_seed)
     logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
     f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
                   'attention_mask': Sequence(feature=Value(dtype='int8')),
@@ -427,7 +431,7 @@ def main():
         documents_shard = documents.shard(num_shards=args.num_shards, index=shard_i)
         logger.info(f"Processing shard {shard_i} with {len(documents_shard)} documents.")
         pre_training_dataset = documents_shard.map(
-            TrainingInstanceFactoryLambda(tokenizer, random_seed=args.random_seed,
+            TrainingInstanceFactoryLambda(tokenizer, rng=rng, rns=rns,
                                           max_seq_length=args.max_seq_length,
                                           short_seq_prob=args.short_seq_prob,
                                           masked_lm_prob=args.masked_lm_prob,
@@ -436,9 +440,6 @@ def main():
             batched=True, features=f, remove_columns=documents.column_names,
             num_proc=cpu_count)
         shard_output_file = "_".join([args.output_dataset, str(shard_i)])
-        # shuffle all training instance
-        logger.info(f"Shuffling {len(pre_training_dataset)} samples.")
-        pre_training_dataset = pre_training_dataset.shuffle(args.random_seed)
         logger.info(f"Saving dataset {shard_output_file} with {len(pre_training_dataset)} samples to disk.")
         pre_training_dataset.save_to_disk(shard_output_file)
 
