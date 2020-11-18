@@ -76,14 +76,9 @@ class PreTrainingArguments:
         metadata={"help": "Number of shards applied to output dataset"}
     )
 
-    document_batch_size: Optional[int] = field(
-        default=100,
-        metadata={"help": "Batch size for document transformations"}
-    )
-
-    instance_batch_size: Optional[int] = field(
+    batch_size: Optional[int] = field(
         default=1000,
-        metadata={"help": "Batch size for training instance transformations"}
+        metadata={"help": "Batch size for document transformations"}
     )
 
     show_samples: Optional[int] = field(
@@ -427,9 +422,9 @@ def main():
         dataset = load_dataset('wikipedia', "20200501.en", split='train')
 
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
-    logger.info(f"Segmenting pre-training dataset into sentences and encoding. Please wait...")
+    logger.info(f"Sentence segmenting and encoding. Please wait...")
     documents = dataset.map(TokenizerLambda(tokenizer, rng, args.document_size_threshold), batched=True,
-                            remove_columns=dataset.column_names, batch_size=args.document_batch_size,
+                            remove_columns=dataset.column_names, batch_size=args.batch_size,
                             num_proc=cpu_count)
     logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
     f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
@@ -448,7 +443,7 @@ def main():
                                           masked_lm_prob=args.masked_lm_prob,
                                           dupe_factor=args.dupe_factor,
                                           max_predictions_per_seq=args.max_predictions_per_seq),
-            batched=True, features=f, remove_columns=documents.column_names, batch_size=args.instance_batch_size,
+            batched=True, features=f, remove_columns=documents.column_names, batch_size=args.batch_size,
             num_proc=cpu_count)
         shard_output_file = "_".join([args.output_dataset, str(shard_i)])
         logger.info(f"Saving dataset {shard_output_file} with {len(pre_training_dataset)} samples to disk.")
