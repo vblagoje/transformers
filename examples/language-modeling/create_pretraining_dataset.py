@@ -24,9 +24,9 @@ from typing import List, Dict, Any, Optional
 import nltk
 import numpy as np
 from dataclasses import dataclass, field
-from datasets import load_from_disk, load_dataset, Sequence, Features, Value
+from datasets import load_from_disk, Sequence, Features, Value
 
-from transformers import (PreTrainedTokenizer, HfArgumentParser, BertTokenizerFast)
+from transformers import (PreTrainedTokenizer, HfArgumentParser, AutoTokenizer)
 
 nltk.download('punkt')
 logger = logging.getLogger(__name__)
@@ -37,11 +37,6 @@ class PreTrainingArguments:
     input_dataset: str = field(
         default="./small_wikipedia_sample",
         metadata={"help": "Input dataset name consisting of text docs used to create LM pre-training features"}
-    )
-
-    use_remote_input_dataset: bool = field(
-        default=False,
-        metadata={"help": "If dataset is remote, get it using load_dataset, otherwise load dataset using load_dataset"}
     )
 
     output_dataset: str = field(
@@ -57,8 +52,8 @@ class PreTrainingArguments:
     )
 
     document_size_threshold: Optional[int] = field(
-        default=4,
-        metadata={"help": "Minimum required number of sentences in document"}
+        default=10,
+        metadata={"help": "Minimum required number of sentences in the document"}
     )
 
     dupe_factor: Optional[int] = field(
@@ -68,7 +63,7 @@ class PreTrainingArguments:
 
     num_proc: Optional[int] = field(
         default=-1,
-        metadata={"help": "Number of processes for multiprocessing. By default it doesn't use multiprocessing."}
+        metadata={"help": "Number of processes for multiprocessing."}
     )
 
     num_shards: Optional[int] = field(
@@ -123,13 +118,15 @@ class TokenizerLambda(object):
 
     def __call__(self, documents: List[str]) -> Dict[str, Any]:
         # batched version
+        remove_end_count = 2
         outputs = []
         for doc in documents[self.text_column]:
             sentences = nltk.sent_tokenize(doc)
             if len(sentences) > 1:
                 # remove category and references from the end of wikipedia document
                 # TODO cleaning dataset is a better approach
-                sentences.pop()
+                for i in range(remove_end_count):
+                    sentences.pop()
             if len(sentences) > self.threshold_size:
                 doc_encoded = self.tokenizer.batch_encode_plus(sentences, add_special_tokens=False,
                                                                return_token_type_ids=False, return_attention_mask=False)
@@ -414,18 +411,15 @@ def main():
     cpu_count = cpu_count if cpu_count > 0 else 1
     logger.info(f"Using {cpu_count} cpus for data processing")
 
-    tokenizer = BertTokenizerFast.from_pretrained(args.tokenizer)
-
-    if not args.use_remote_input_dataset:
-        dataset = load_from_disk(args.input_dataset)
-    else:
-        dataset = load_dataset('wikipedia', "20200501.en", split='train')
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
+    dataset = load_from_disk(args.input_dataset)
 
     logger.info(f"Pre-training dataset has {len(dataset)} documents")
     logger.info(f"Sentence segmenting and encoding. Please wait...")
     documents = dataset.map(TokenizerLambda(tokenizer, rng, args.document_size_threshold), batched=True,
                             remove_columns=dataset.column_names, batch_size=args.batch_size,
                             num_proc=cpu_count)
+
     logger.info(f"Creating training instances using {len(documents)} documents, please wait...")
     f = Features({'input_ids': Sequence(feature=Value(dtype='int32')),
                   'attention_mask': Sequence(feature=Value(dtype='int8')),
