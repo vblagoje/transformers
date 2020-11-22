@@ -22,14 +22,14 @@ import datasets
 import torch
 from apex.optimizers import FusedLAMB
 from dataclasses import dataclass, field
-from datasets import load_from_disk
+from datasets import load_from_disk, concatenate_datasets
 from pytorch_block_sparse import BlockSparseModelPatcher
 from torch.utils.data import RandomSampler, Dataset, DataLoader, BatchSampler, SequentialSampler
 
 from transformers import (
     HfArgumentParser,
     Trainer,
-    TrainingArguments, set_seed, BertConfig, BertTokenizerFast, BertForPreTraining,
+    TrainingArguments, set_seed, BertConfig, BertForPreTraining,
     get_polynomial_decay_schedule_with_warmup, PreTrainedModel, DataCollator, EvalPrediction, TrainerCallback, )
 
 logger = logging.getLogger(__name__)
@@ -69,10 +69,6 @@ class ModelArguments:
         metadata={"help": "Model config file"},
     )
 
-    tokenizer_name: Optional[str] = field(
-        default='bert-base-uncased',
-        metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
     sparse_model: Optional[bool] = field(
         default=False,
         metadata={"help": "Turn on/off model sparsification"}
@@ -94,16 +90,6 @@ class DataTrainingArguments:
         metadata={"help": "Path to input data directory"},
     )
 
-    block_size: int = field(
-        default=512,
-        metadata={
-            "help": "Optional input sequence length after tokenization."
-                    "The training dataset will be truncated in block of this size for training."
-                    "Default to the model max input length for single sentence inputs (take into "
-                    "account special tokens)."
-        },
-    )
-
 
 @dataclass
 class BertTrainingArguments(TrainingArguments):
@@ -115,9 +101,19 @@ class BertTrainingArguments(TrainingArguments):
     into argparse arguments to be able to specify them on the command line.
     """
 
+    checkpoint_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Directory to load the checkpoint and resume training"}
+    )
+
     resume_from_checkpoint: Optional[bool] = field(
         default=False,
         metadata={"help": "Whether to resume training from checkpoint"}
+    )
+
+    phase1_output_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Output directory for phase1, used to load model for phase2"}
     )
 
     warmup_proportion: Optional[float] = field(
@@ -125,36 +121,12 @@ class BertTrainingArguments(TrainingArguments):
         metadata={"help": "Proportion of training steps for warmup"}
     )
 
-    warmup_proportion_phase2: Optional[float] = field(
-        default=0.1,
-        metadata={"help": "Proportion of training steps for warmup"}
-    )
-
-    learning_rate_phase2: Optional[float] = field(
-        default=4e-3,
-        metadata={"help": "The initial learning rate for phase two"}
-    )
-
-    gradient_accumulation_steps_phase2: Optional[int] = field(
-        default=32,
-        metadata={"help": "Number of updates steps to accumulate gradients before performing a backward/update pass."},
-    )
-
-    max_steps_phase2: Optional[int] = field(
-        default=-1,
-        metadata={"help": "If > 0: set total number of training steps to perform. Override num_train_epochs."},
-    )
-
-    per_device_train_batch_size_phase2: Optional[int] = field(
-        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
-    )
-
-    do_phase1_training: Optional[bool] = field(
+    phase1: Optional[bool] = field(
         default=False,
         metadata={"help": "If true phase 1 training will be executed"}
     )
 
-    do_phase2_training: Optional[bool] = field(
+    phase2: Optional[bool] = field(
         default=False,
         metadata={"help": "If true phase 2 training will be executed"}
     )
@@ -208,6 +180,7 @@ def sparsify_model(model: PreTrainedModel, args: ModelArguments) -> PreTrainedMo
     mp.patch_model(model)
     return model
 
+
 def get_bert_model_config(config_name: str) -> BertConfig:
     # Let's define only the main models using L/H tuples
     # <p>BERT Miniatures is the set of 24 BERT models referenced in
@@ -237,28 +210,6 @@ def get_world_size(args):
     return max(1, world_size)
 
 
-def find_checkpoint(args: TrainingArguments):
-    checkpoint_dir = os.path.join(args.output_dir, "checkpoint-*")
-    checkpoints = glob.glob(checkpoint_dir)
-    if checkpoints:
-        checkpoint_dir = checkpoints[0]
-    else:
-        checkpoint_dir = None
-    return checkpoint_dir
-
-
-def prepare_second_phase_training_args(training_args: BertTrainingArguments):
-    # shift second phase to the end of first phase
-    training_args.warmup_steps = int(training_args.max_steps_phase2 *
-                                     training_args.warmup_proportion_phase2)
-    training_args.max_steps = training_args.max_steps_phase2
-
-    training_args.learning_rate = training_args.learning_rate_phase2
-    training_args.gradient_accumulation_steps = training_args.gradient_accumulation_steps_phase2
-    training_args.per_device_train_batch_size = training_args.per_device_train_batch_size_phase2
-    return training_args
-
-
 def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
     m_params = list(model.named_parameters())
     no_decay = ['bias', 'gamma', 'beta', 'LayerNorm.weight']
@@ -273,6 +224,26 @@ def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer,
                                                              num_training_steps=args.max_steps,
                                                              power=0.5)
     return optimizer, lr_scheduler
+
+
+def find_datasets_for_shard(input_dir, rank):
+    shard_dataset_path = "_".join(["*", "shard", str(rank), "*"])
+    dir_path = os.path.join(input_dir, shard_dataset_path)
+    return glob.glob(dir_path)
+
+
+def load_dataset(data_args, rank):
+    dataset_dirs = find_datasets_for_shard(data_args.input_dir, rank)
+    if len(dataset_dirs) == 0:
+        raise RuntimeError(f"No datasets found for process with {rank} in {data_args.input_dir}")
+    elif len(dataset_dirs) >= 1:
+        dataset = load_from_disk(dataset_dirs[0])
+        if len(dataset_dirs) > 1:
+            for dataset_dir in dataset_dirs[1:]:
+                d = load_from_disk(dataset_dir)
+                dataset = concatenate_datasets([dataset, d])
+            dataset = dataset.shuffle()
+    return dataset
 
 
 def main():
@@ -323,9 +294,6 @@ def main():
 
     logger.info(f"Instantiating a new config instance {bert_config}")
 
-    # Fast tokenizer helps a lot with the speed of encoding
-    tokenizer = BertTokenizerFast.from_pretrained(model_args.tokenizer_name)
-
     # fresh MLM/NSP model
     model = BertForPreTraining(bert_config)
 
@@ -338,41 +306,35 @@ def main():
 
     if world_size > 1:
         rank = torch.distributed.get_rank()
-        shard_dataset_path = "_".join(["shard", str(rank)])
-        shard_dataset_path = os.path.join(data_args.input_dir, shard_dataset_path)
-        logger.info(f"Loading pre-training dataset shard {shard_dataset_path}")
-        dataset = load_from_disk(shard_dataset_path)
+        dataset = load_dataset(data_args, rank)
         logger.info(f"Process with rank {rank} got assigned dataset shard of {len(dataset)} samples")
     else:
-        logger.info("Loading pre-training dataset...")
-        dataset_path = os.path.join(data_args.input_dir, "encoded_bert_input_dataset")
-        dataset = load_from_disk(dataset_path)
+        dataset = load_dataset(data_args, 0)
         logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
 
     training_args.warmup_steps = int(training_args.max_steps *
                                      training_args.warmup_proportion)
 
-    checkpoint_dir = find_checkpoint(training_args)
     # Training
-    if training_args.do_phase1_training and training_args.do_phase2_training:
+    if training_args.phase1 and training_args.phase2:
         raise RuntimeError("Pre-training script has to be invoked for phase 1 or phase 2 of the pre-training, not both")
 
     logger.info(f"Starting {'phase 1' if training_args.do_phase1_training else 'phase 2'}...")
-    if checkpoint_dir and training_args.resume_from_checkpoint:
-        logger.info(f"Pre-training continues from checkpoint {checkpoint_dir}")
-        model = model.from_pretrained(checkpoint_dir)
-        logger.info(f"Loaded model with {model.num_parameters()} parameters from checkpoint {checkpoint_dir}")
-    elif training_args.do_phase2_training:
-        model_state = torch.load(os.path.join(training_args.output_dir, "pytorch_model.bin"))
+    if training_args.checkpoint_dir and training_args.resume_from_checkpoint:
+        logger.info(f"Pre-training continues from checkpoint {training_args.checkpoint_dir}")
+        model = model.from_pretrained(training_args.checkpoint_dir)
+        logger.info(f"Loaded model from checkpoint {training_args.checkpoint_dir}")
+    elif training_args.phase2:
+        model_state = torch.load(os.path.join(training_args.phase1_output_dir, "pytorch_model.bin"))
         model.load_state_dict(model_state)
-        logger.info(f"Loaded model prom phase 1, having {model.num_parameters()} parameters, continue pre-training")
+        logger.info(f"Loaded model prom phase 1, continue pre-training")
 
     training_args.warmup_steps = int(training_args.max_steps *
                                      training_args.warmup_proportion)
     trainer = BertTrainer(model=model, args=training_args, train_dataset=dataset,
                           optimizers=prepare_optimizer_and_scheduler(model, training_args))
     # checkpoint_dir is ignored if None
-    trainer.train(model_path=checkpoint_dir)
+    trainer.train(model_path=training_args.checkpoint_dir)
     trainer.save_model()
 
 

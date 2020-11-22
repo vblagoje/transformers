@@ -13,51 +13,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-echo "Container nvidia build = " $NVIDIA_BUILD_ID
 CODEDIR=${24:-${PWD}}
-train_batch_size=${1:-2}
-learning_rate=${2:-"6e-3"}
-precision=${3:-"fp16"}
-num_gpus=${4:-8}
-warmup_proportion=${5:-"0.2843"}
-train_steps=${6:-7038}
-save_checkpoint_steps=${7:-200}
-resume_training=${8:-"false"}
-create_logfile=${9:-"true"}
-accumulate_gradients=${10:-"true"}
-gradient_accumulation_steps=${11:-2}
-seed=${12:-12439}
-job_name=${13:-"bert_lamb_pretraining"}
-allreduce_post_accumulation=${14:-"true"}
-allreduce_post_accumulation_fp16=${15:-"true"}
-train_batch_size_phase2=${16:-128}
+job_name=${1:-"bert_lamb_pretraining_`date +%s`"}
+train_batch_size=${2:-64}
+learning_rate=${3:-"6e-3"}
+precision=${4:-"fp16"}
+num_gpus=${5:-8}
+warmup_proportion=${6:-"0.2843"}
+train_steps=${7:-7038}
+save_checkpoint_steps=${8:-200}
+resume_training=${9:-"false"}
+create_logfile=${10:-"true"}
+accumulate_gradients=${11:-"true"}
+gradient_accumulation_steps=${12:-16}
+seed=${13:-12439}
+train_batch_size_phase2=${16:-8}
 learning_rate_phase2=${17:-"4e-3"}
 warmup_proportion_phase2=${18:-"0.128"}
 train_steps_phase2=${19:-1563}
-gradient_accumulation_steps_phase2=${20:-16}
+gradient_accumulation_steps_phase2=${20:-64}
 DATA_DIR_PHASE1=${21:-${CODEDIR}/data_phase1}
 BERT_CONFIG=${22:-"${CODEDIR}/bert_configs/bert-mini.json"}
 DATA_DIR_PHASE2=${23:-${CODEDIR}/data_phase2}
 init_checkpoint=${25:-"None"}
-RESULTS_DIR=$CODEDIR/results
+RESULTS_DIR=$CODEDIR/results/$job_name
 CHECKPOINTS_DIR=$RESULTS_DIR/checkpoints
 MASTER_PORT=${27:-"1234"}
-wandb_project_name=${29:-"None"}
-wandb_run_id=${30:-"None"}
 
 mkdir -p $CHECKPOINTS_DIR
 
 if [ ! -d "$DATA_DIR_PHASE1" ]; then
   echo "Warning! $DATA_DIR_PHASE1 directory missing. Training cannot start"
+  exit -1
+fi
+if [ ! -d "$DATA_DIR_PHASE2" ]; then
+  echo "Warning! $DATA_DIR_PHASE2 directory missing. Training cannot start"
+  exit -1
 fi
 if [ ! -d "$RESULTS_DIR" ]; then
   echo "Error! $RESULTS_DIR directory missing."
   exit -1
-fi
-if [ ! -d "$CHECKPOINTS_DIR" ]; then
-  echo "Warning! $CHECKPOINTS_DIR directory missing."
-  echo "Checkpoints will be written to $RESULTS_DIR instead."
-  CHECKPOINTS_DIR=$RESULTS_DIR
 fi
 if [ ! -f "$BERT_CONFIG" ]; then
   echo "Error! BERT large configuration file not found at $BERT_CONFIG"
@@ -86,26 +81,12 @@ if [ "$resume_training" == "true" ]; then
   CHECKPOINT="--resume_from_checkpoint"
 fi
 
-ALL_REDUCE_POST_ACCUMULATION=""
-if [ "$allreduce_post_accumulation" == "true" ]; then
-  ALL_REDUCE_POST_ACCUMULATION="--allreduce_post_accumulation"
-fi
+CURRENTEPOCTIME=`date +"%Y-%m-%d %T"`
 
-ALL_REDUCE_POST_ACCUMULATION_FP16=""
-if [ "$allreduce_post_accumulation_fp16" == "true" ]; then
-  ALL_REDUCE_POST_ACCUMULATION_FP16="--allreduce_post_accumulation_fp16"
-fi
-
-INIT_CHECKPOINT=""
-if [ "$init_checkpoint" != "None" ]; then
-  INIT_CHECKPOINT="--init_checkpoint=$init_checkpoint"
-fi
-
-echo $DATA_DIR_PHASE1
 INPUT_DIR=$DATA_DIR_PHASE1
 CMD=" $CODEDIR/run_pretraining.py"
 CMD+=" --input_dir=$DATA_DIR_PHASE1"
-CMD+=" --output_dir=$CHECKPOINTS_DIR"
+CMD+=" --output_dir=$RESULTS_DIR/phase1"
 CMD+=" --config_file=$BERT_CONFIG"
 CMD+=" --per_device_train_batch_size=$train_batch_size"
 CMD+=" --max_steps=$train_steps"
@@ -113,38 +94,19 @@ CMD+=" --warmup_proportion=$warmup_proportion"
 CMD+=" --save_steps=$save_checkpoint_steps"
 CMD+=" --learning_rate=$learning_rate"
 CMD+=" --seed=$seed"
-CMD+=" --logging_steps=10"
+CMD+=" --logging_steps=2"
 CMD+=" --save_total_limit=1"
 CMD+=" $PREC"
 CMD+=" $ACCUMULATE_GRADIENTS"
 CMD+=" $CHECKPOINT"
-CMD+=" $INIT_CHECKPOINT"
 CMD+=" --do_train"
-CMD+=" --do_phase1_training"
+CMD+=" --phase1"
 
-#CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus --master_port $MASTER_PORT $CMD"
-CMD="python3 $CMD"
+CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
 
-if [ "$create_logfile" = "true" ]; then
-  export GBS=$(expr $train_batch_size \* $num_gpus)
-  printf -v TAG "pyt_bert_pretraining_phase1_%s_gbs%d" "$precision" $GBS
-  DATESTAMP=$(date +'%y%m%d%H%M%S')
-  LOGFILE=$RESULTS_DIR/$job_name.$TAG.$DATESTAMP.log
-  printf "Logs written to %s\n" "$LOGFILE"
-fi
+echo $CMD
 
-set -x
-if [ -z "$LOGFILE" ]; then
-  $CMD
-else
-  (
-    $CMD
-  )
-fi
-
-set +x
-
-echo "finished pretraining"
+echo "finished phase1"
 
 #Start Phase2
 
@@ -165,63 +127,27 @@ if [ "$accumulate_gradients" == "true" ]; then
   ACCUMULATE_GRADIENTS="--gradient_accumulation_steps=$gradient_accumulation_steps_phase2"
 fi
 
-ALL_REDUCE_POST_ACCUMULATION=""
-if [ "$allreduce_post_accumulation" == "true" ]; then
-  ALL_REDUCE_POST_ACCUMULATION="--allreduce_post_accumulation"
-fi
-
-ALL_REDUCE_POST_ACCUMULATION_FP16=""
-if [ "$allreduce_post_accumulation_fp16" == "true" ]; then
-  ALL_REDUCE_POST_ACCUMULATION_FP16="--allreduce_post_accumulation_fp16"
-fi
-
-echo $DATA_DIR_PHASE2
 INPUT_DIR=$DATA_DIR_PHASE2
 CMD=" $CODEDIR/run_pretraining.py"
 CMD+=" --input_dir=$DATA_DIR_PHASE2"
-CMD+=" --output_dir=$CHECKPOINTS_DIR"
+CMD+=" --output_dir=$RESULTS_DIR/phase2"
+CMD+=" --phase1_output_dir=$RESULTS_DIR/phase1"
 CMD+=" --config_file=$BERT_CONFIG"
 CMD+=" --bert_model=bert-large-uncased"
 CMD+=" --train_batch_size=$train_batch_size_phase2"
-CMD+=" --max_seq_length=512"
-CMD+=" --max_predictions_per_seq=80"
 CMD+=" --max_steps=$train_steps_phase2"
 CMD+=" --warmup_proportion=$warmup_proportion_phase2"
 CMD+=" --num_steps_per_checkpoint=$save_checkpoint_steps"
 CMD+=" --learning_rate=$learning_rate_phase2"
 CMD+=" --seed=$seed"
-CMD+=" --logging_steps=10"
+CMD+=" --logging_steps=2"
 CMD+=" --save_total_limit=1"
 CMD+=" $PREC"
 CMD+=" $ACCUMULATE_GRADIENTS"
 CMD+=" $CHECKPOINT"
-CMD+=" $ALL_REDUCE_POST_ACCUMULATION"
-CMD+=" $ALL_REDUCE_POST_ACCUMULATION_FP16"
-CMD+=" --do_train --do_phase2_training --resume_from_checkpoint --phase1_end_step=$train_steps"
-CMD+=" --json-summary ${RESULTS_DIR}/dllogger.json "
+CMD+=" --do_train --phase2"
+CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
 
-CMD+=" --wandb_project_name=$wandb_project_name "
-CMD+=" --wandb_run_id=$wandb_run_id "
-
-CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus --master_port $MASTER_PORT $CMD"
-
-if [ "$create_logfile" = "true" ]; then
-  export GBS=$(expr $train_batch_size_phase2 \* $num_gpus)
-  printf -v TAG "pyt_bert_pretraining_phase2_%s_gbs%d" "$precision" $GBS
-  DATESTAMP=$(date +'%y%m%d%H%M%S')
-  LOGFILE=$RESULTS_DIR/$job_name.$TAG.$DATESTAMP.log
-  printf "Logs written to %s\n" "$LOGFILE"
-fi
-
-set -x
-if [ -z "$LOGFILE" ]; then
-  echo $CMD
-else
-  (
-    echo $CMD
-  )
-fi
-
-set +x
+echo $CMD
 
 echo "finished phase2"
