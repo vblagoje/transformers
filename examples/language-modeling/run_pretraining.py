@@ -227,7 +227,7 @@ def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer,
 
 
 def find_datasets_for_shard(input_dir, rank):
-    shard_dataset_path = "_".join(["*", "shard", str(rank), "*"])
+    shard_dataset_path = "_".join(["*", "shard", str(rank)])
     dir_path = os.path.join(input_dir, shard_dataset_path)
     return glob.glob(dir_path)
 
@@ -319,7 +319,7 @@ def main():
     if training_args.phase1 and training_args.phase2:
         raise RuntimeError("Pre-training script has to be invoked for phase 1 or phase 2 of the pre-training, not both")
 
-    logger.info(f"Starting {'phase 1' if training_args.do_phase1_training else 'phase 2'}...")
+    logger.info(f"Starting {'phase 1' if training_args.phase1 else 'phase 2'}...")
     if training_args.checkpoint_dir and training_args.resume_from_checkpoint:
         logger.info(f"Pre-training continues from checkpoint {training_args.checkpoint_dir}")
         model = model.from_pretrained(training_args.checkpoint_dir)

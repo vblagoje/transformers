@@ -32,6 +32,7 @@ learning_rate_phase2=${17:-"4e-3"}
 warmup_proportion_phase2=${18:-"0.128"}
 train_steps_phase2=${19:-1563}
 gradient_accumulation_steps_phase2=${20:-64}
+num_workers=0
 DATA_DIR_PHASE1=${21:-${CODEDIR}/data_phase1}
 BERT_CONFIG=${22:-"${CODEDIR}/bert_configs/bert-mini.json"}
 DATA_DIR_PHASE2=${23:-${CODEDIR}/data_phase2}
@@ -81,8 +82,6 @@ if [ "$resume_training" == "true" ]; then
   CHECKPOINT="--resume_from_checkpoint"
 fi
 
-CURRENTEPOCTIME=`date +"%Y-%m-%d %T"`
-
 INPUT_DIR=$DATA_DIR_PHASE1
 CMD=" $CODEDIR/run_pretraining.py"
 CMD+=" --input_dir=$DATA_DIR_PHASE1"
@@ -101,6 +100,7 @@ CMD+=" $ACCUMULATE_GRADIENTS"
 CMD+=" $CHECKPOINT"
 CMD+=" --do_train"
 CMD+=" --phase1"
+CMD+=" --num_workers=$num_workers"
 
 CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
 
@@ -146,6 +146,7 @@ CMD+=" $PREC"
 CMD+=" $ACCUMULATE_GRADIENTS"
 CMD+=" $CHECKPOINT"
 CMD+=" --do_train --phase2"
+CMD+=" --num_workers=$num_workers"
 CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
 
 echo $CMD
