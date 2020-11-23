@@ -104,7 +104,7 @@ CMD+=" --num_workers=$num_workers"
 
 CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
 
-echo $CMD
+$CMD
 
 echo "finished phase1"
 
@@ -133,11 +133,10 @@ CMD+=" --input_dir=$DATA_DIR_PHASE2"
 CMD+=" --output_dir=$RESULTS_DIR/phase2"
 CMD+=" --phase1_output_dir=$RESULTS_DIR/phase1"
 CMD+=" --config_file=$BERT_CONFIG"
-CMD+=" --bert_model=bert-large-uncased"
-CMD+=" --train_batch_size=$train_batch_size_phase2"
+CMD+=" --per_device_train_batch_size=$train_batch_size_phase2"
 CMD+=" --max_steps=$train_steps_phase2"
 CMD+=" --warmup_proportion=$warmup_proportion_phase2"
-CMD+=" --num_steps_per_checkpoint=$save_checkpoint_steps"
+CMD+=" --save_steps=$save_checkpoint_steps"
 CMD+=" --learning_rate=$learning_rate_phase2"
 CMD+=" --seed=$seed"
 CMD+=" --logging_steps=2"
@@ -149,6 +148,6 @@ CMD+=" --do_train --phase2"
 CMD+=" --num_workers=$num_workers"
 CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
 
-echo $CMD
+$CMD
 
 echo "finished phase2"
