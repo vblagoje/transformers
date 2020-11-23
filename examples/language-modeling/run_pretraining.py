@@ -212,7 +212,7 @@ def get_world_size(args):
 
 def prepare_optimizer_and_scheduler(model, args) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
     m_params = list(model.named_parameters())
-    no_decay = ['bias', 'gamma', 'beta', 'LayerNorm.weight']
+    no_decay = ['bias', 'gamma', 'beta', 'LayerNorm']
 
     optimizer_grouped_parameters = [
         {'params': [p for n, p in m_params if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
@@ -317,7 +317,7 @@ def main():
 
     # Training
     if training_args.phase1 and training_args.phase2:
-        raise RuntimeError("Pre-training script has to be invoked for phase 1 or phase 2 of the pre-training, not both")
+        raise RuntimeError("Pre-training script has to be invoked for either phase 1 or phase 2, not both")
 
     logger.info(f"Starting {'phase 1' if training_args.phase1 else 'phase 2'}...")
     if training_args.checkpoint_dir and training_args.resume_from_checkpoint:
@@ -327,7 +327,7 @@ def main():
     elif training_args.phase2:
         model_state = torch.load(os.path.join(training_args.phase1_output_dir, "pytorch_model.bin"))
         model.load_state_dict(model_state)
-        logger.info(f"Loaded model prom phase 1, continue pre-training")
+        logger.info(f"Loaded model from phase 1, continue pre-training")
 
     training_args.warmup_steps = int(training_args.max_steps *
                                      training_args.warmup_proportion)
