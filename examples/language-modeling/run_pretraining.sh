@@ -25,7 +25,7 @@ save_checkpoint_steps=${8:-200}
 resume_training=${9:-"false"}
 create_logfile=${10:-"true"}
 accumulate_gradients=${11:-"true"}
-gradient_accumulation_steps=${12:-16}
+gradient_accumulation_steps=${12:-8}
 seed=${13:-12439}
 train_batch_size_phase2=${16:-8}
 learning_rate_phase2=${17:-"4e-3"}
@@ -92,6 +92,7 @@ CMD+=" --max_steps=$train_steps"
 CMD+=" --warmup_proportion=$warmup_proportion"
 CMD+=" --save_steps=$save_checkpoint_steps"
 CMD+=" --learning_rate=$learning_rate"
+CMD+=" --weight_decay=0.01"
 CMD+=" --seed=$seed"
 CMD+=" --logging_steps=2"
 CMD+=" --save_total_limit=1"
@@ -138,6 +139,7 @@ CMD+=" --max_steps=$train_steps_phase2"
 CMD+=" --warmup_proportion=$warmup_proportion_phase2"
 CMD+=" --save_steps=$save_checkpoint_steps"
 CMD+=" --learning_rate=$learning_rate_phase2"
+CMD+=" --weight_decay=0.01"
 CMD+=" --seed=$seed"
 CMD+=" --logging_steps=2"
 CMD+=" --save_total_limit=1"
