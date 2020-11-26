@@ -1,0 +1,37 @@
+{
+  "builder_name": "wikipedia",
+  "citation": "@ONLINE {wikidump,\n    author = \"Wikimedia Foundation\",\n    title  = \"Wikimedia Downloads\",\n    url    = \"https://dumps.wikimedia.org\"\n}\n",
+  "config_name": "20200501.en",
+  "dataset_size": 18330235071,
+  "description": "Wikipedia dataset containing cleaned articles of all languages.\nThe datasets are built from the Wikipedia dump\n(https://dumps.wikimedia.org/) with one split per language. Each example\ncontains the content of one full Wikipedia article with cleaning to strip\nmarkdown and unwanted sections (references, etc.).\n",
+  "download_checksums": {},
+  "download_size": 18241319609,
+  "features": {
+    "text": {
+      "_type": "Value",
+      "dtype": "string",
+      "id": null
+    }
+  },
+  "homepage": "https://dumps.wikimedia.org",
+  "license": "",
+  "post_processed": null,
+  "post_processing_size": null,
+  "size_in_bytes": 36571554680,
+  "splits": {
+    "train": {
+      "dataset_name": "wikipedia",
+      "name": "train",
+      "num_bytes": 18330235071,
+      "num_examples": 6078422
+    }
+  },
+  "supervised_keys": null,
+  "version": {
+    "description": "New split API (https://tensorflow.org/datasets/splits)",
+    "major": 1,
+    "minor": 0,
+    "patch": 0,
+    "version_str": "1.0.0"
+  }
+}
