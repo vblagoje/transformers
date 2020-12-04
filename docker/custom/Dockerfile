@@ -42,6 +42,7 @@ RUN pip install /workspace/install/python/tensorrtserver*.whl
 
 WORKDIR /workspace/bert
 COPY . .
+RUN pip install datasets
 RUN pip install --upgrade --no-cache-dir pip \
 	&& pip install --no-cache-dir -e .
 
