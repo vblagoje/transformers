@@ -246,6 +246,18 @@ def load_dataset(data_args, rank):
     return dataset
 
 
+def check_training_args(training_args):
+    if training_args.gradient_accumulation_steps < 1:
+        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
+            training_args.gradient_accumulation_steps))
+    if training_args.train_batch_size % training_args.gradient_accumulation_steps != 0:
+        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, batch size {} should be divisible".format(
+            training_args.gradient_accumulation_steps, training_args.train_batch_size))
+
+    if training_args.phase1 and training_args.phase2:
+        raise ValueError("Pre-training script has to be invoked for either phase 1 or phase 2, not both")
+
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -264,6 +276,9 @@ def main():
             f"Output directory ({training_args.output_dir}) already exists and is not empty. "
             f"Use --overwrite_output_dir to overcome."
         )
+
+    # check arguments
+    check_training_args(training_args)
 
     # Setup logging
     logging.basicConfig(
@@ -312,8 +327,8 @@ def main():
         dataset = load_dataset(data_args, 0)
         logger.info(f"Using a pre-training dataset of {len(dataset)} total samples")
 
-    training_args.warmup_steps = int(training_args.max_steps *
-                                     training_args.warmup_proportion)
+    training_args.warmup_steps = int(training_args.max_steps * training_args.warmup_proportion)
+    training_args.per_device_train_batch_size = training_args.per_device_train_batch_size // training_args.gradient_accumulation_steps
 
     # Training
     if training_args.phase1 and training_args.phase2:
@@ -329,8 +344,6 @@ def main():
         model.load_state_dict(model_state)
         logger.info(f"Loaded model from phase 1, continue pre-training")
 
-    training_args.warmup_steps = int(training_args.max_steps *
-                                     training_args.warmup_proportion)
     trainer = BertTrainer(model=model, args=training_args, train_dataset=dataset,
                           optimizers=prepare_optimizer_and_scheduler(model, training_args))
     # checkpoint_dir is ignored if None
