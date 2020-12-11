@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG FROM_IMAGE_NAME=nvcr.io/nvidia/pytorch:20.06-py3
+ARG FROM_IMAGE_NAME=nvcr.io/nvidia/pytorch:20.08-py3
 
 # Uncomment this and below to create a different conda environment
 # Miniconda env Installation in a different environment
@@ -25,13 +25,19 @@ ARG FROM_IMAGE_NAME=nvcr.io/nvidia/pytorch:20.06-py3
 # RUN echo "Test conda environment installation"
 # RUN python -c "import tensorboardX"
 
-FROM nvcr.io/nvidia/tritonserver:20.06-v1-py3-clientsdk as trt
+FROM nvcr.io/nvidia/tritonserver:20.07-v1-py3-clientsdk as trt
 FROM ${FROM_IMAGE_NAME}
 RUN apt-get update && apt-get install -y pbzip2 pv bzip2 cabextract neovim zsh
 
 ENV BERT_PREP_WORKING_DIR /workspace/bert/data
 
 WORKDIR /workspace
+
+RUN git clone https://github.com/awslabs/mlm-scoring.git \
+	&& cd mlm-scoring \
+	&& git checkout f5a9710c8f9a626e6daf8cdab89dcaa6adc8a12e \
+	&& pip install -e . -v
+
 # Copy the perf_client over
 COPY --from=trt /workspace/install/ /workspace/install/
 ENV LD_LIBRARY_PATH /workspace/install/lib:${LD_LIBRARY_PATH}
