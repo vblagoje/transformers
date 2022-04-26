@@ -17,12 +17,12 @@
 import unittest
 from copy import deepcopy
 
+from huggingface_hub import hf_hub_download
 from transformers import GreaseLMConfig, is_torch_available
 from transformers.testing_utils import TestCasePlus, require_torch, slow, torch_device
 
-from ..generation.test_generation_utils import GenerationTesterMixin
 from ..test_configuration_common import ConfigTester
-from ..test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor, random_attention_mask
+from ..test_modeling_common import floats_tensor, ids_tensor, random_attention_mask
 
 
 if is_torch_available():
@@ -132,7 +132,8 @@ class GreaseLMModelTester:
     def create_and_check_model(
         self, config, input_ids, token_type_ids, input_mask, sequence_labels, token_labels, choice_labels
     ):
-        model = GreaseLMModel(config=config)
+        concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
+        model = GreaseLMModel(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
         model.eval()
         result = model(input_ids, attention_mask=input_mask, token_type_ids=token_type_ids)
@@ -179,7 +180,8 @@ class GreaseLMModelTester:
         self, config, input_ids, token_type_ids, input_mask, sequence_labels, token_labels, choice_labels
     ):
         config.num_choices = self.num_choices
-        model = GreaseLMForMultipleChoice(config=config)
+        concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
+        model = GreaseLMForMultipleChoice(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
         model.eval()
         multiple_choice_inputs_ids = input_ids.unsqueeze(1).expand(-1, self.num_choices, -1).contiguous()
@@ -209,7 +211,7 @@ class GreaseLMModelTester:
 
 
 @require_torch
-class GreaseLMModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
+class GreaseLMModelTest(unittest.TestCase):
 
     all_model_classes = (
         (
@@ -271,29 +273,9 @@ class GreaseLMModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCa
             encoder_attention_mask,
         )
 
-    def test_for_causal_lm(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
-        self.model_tester.create_and_check_for_causal_lm(*config_and_inputs)
-
-    def test_decoder_model_past_with_large_inputs(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
-        self.model_tester.create_and_check_decoder_model_past_large_inputs(*config_and_inputs)
-
-    def test_for_masked_lm(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs()
-        self.model_tester.create_and_check_for_masked_lm(*config_and_inputs)
-
-    def test_for_token_classification(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs()
-        self.model_tester.create_and_check_for_token_classification(*config_and_inputs)
-
     def test_for_multiple_choice(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_for_multiple_choice(*config_and_inputs)
-
-    def test_for_question_answering(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs()
-        self.model_tester.create_and_check_for_question_answering(*config_and_inputs)
 
     @slow
     def test_model_from_pretrained(self):
