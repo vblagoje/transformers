@@ -28,6 +28,7 @@ from torch import nn
 from torch.autograd import Variable
 
 from huggingface_hub import hf_hub_download
+from torch.nn import CrossEntropyLoss
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_scatter import scatter
@@ -1413,6 +1414,7 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         input_ids,
         attention_mask,
         token_type_ids,
+        labels,
         special_tokens_mask,
         concept_ids,
         node_type_ids,
@@ -1435,6 +1437,11 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         :param token_type_ids:
               (:obj:`torch.LongTensor` of shape :obj:`(batch_size, number_of_choices, seq_len)`):
                    Token type ids for the language model.
+        :param labels:
+              (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+                   Labels for computing the multiple choice classification loss. Indices should be in `[0, ...,
+                   num_choices-1]` where `num_choices` is the size of the second dimension of the input tensors. (See
+                   `input_ids` above)
         :param special_tokens_mask:
               (:obj:`torch.LongTensor` of shape :obj:`(batch_size, number_of_choices, seq_len)`):
                    Output mask for the language model.
@@ -1505,7 +1512,13 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         logits = self.fc(self.dropout_fc(concat))
 
         logits = logits.view(bs, nc)
+        loss = None
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(logits, labels)
+
         return MultipleChoiceModelOutput(
+            loss=loss,
             logits=logits,
             attentions=pool_attn,
         )
