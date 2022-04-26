@@ -42,6 +42,18 @@ class GreaseLMConfig(BertConfig):
     The [`GreaseLMConfig`] class directly inherits [`BertConfig`]. It reuses the same defaults. Please check the parent
     class for more information.
 
+    Args:
+        num_gnn_layers (`int`, *optional*, defaults to 5):
+            Number of GNN layers
+        num_node_types (`int`, *optional*, defaults to 4):
+            Number of node types in the graph
+        num_edge_types (`int`, *optional*, defaults to 38):
+            Number of edge types in the graph
+        concept_dim (`int`, *optional*, defaults to 200):
+            Dimension of the concept embeddings
+        gnn_hidden_size (`int`, *optional*, defaults to 200):
+            Hidden size of the GNN
+
     Examples:
 
     ```python
@@ -58,9 +70,28 @@ class GreaseLMConfig(BertConfig):
     ```"""
     model_type = "greaselm"
 
-    def __init__(self, pad_token_id=1, bos_token_id=0, eos_token_id=2, **kwargs):
+    def __init__(
+        self, num_gnn_layers=5, num_node_types=4, num_edge_types=38, concept_dim=200, gnn_hidden_size=200, **kwargs
+    ):
         """Constructs GreaseLMConfig."""
-        super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
+        super().__init__(**kwargs)
+        default_dropout = 0.2
+        self.num_gnn_layers = num_gnn_layers
+        self.num_node_types = num_node_types
+        self.num_edge_types = num_edge_types
+        self.concept_dim = concept_dim
+        self.gnn_hidden_size = gnn_hidden_size
+        self.num_lm_gnn_attention_heads = kwargs.pop("num_lm_gnn_attention_heads", 2)
+        self.fc_dim = kwargs.pop("fc_dim", 200)
+        self.n_fc_layer = kwargs.pop("n_fc_layer", 0)
+        self.p_emb = kwargs.pop("p_emb", default_dropout)
+        self.p_gnn = kwargs.pop("p_gnn", default_dropout)
+        self.p_fc = kwargs.pop("p_fc", default_dropout)
+        self.ie_dim = kwargs.pop("ie_dim", 200)
+        self.info_exchange = kwargs.pop("info_exchange", True)
+        self.ie_layer_num = kwargs.pop("ie_layer_num", 1)
+        self.sep_ie_layers = kwargs.pop("sep_ie_layers", False)
+        self.layer_id = kwargs.pop("layer_id", -1)
 
 
 class GreaseLMOnnxConfig(OnnxConfig):

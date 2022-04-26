@@ -201,7 +201,7 @@ class CustomizedEmbedding(nn.Module):
         pretrained_concept_emb=None,
         freeze_ent_emb=True,
         scale=1.0,
-        init_range=0.02,
+        initializer_range=0.02,
     ):
         super().__init__()
         self.scale = scale
@@ -212,7 +212,7 @@ class CustomizedEmbedding(nn.Module):
                 self.emb.weight.data.fill_(0)
                 self.emb.weight.data[:concept_num].copy_(pretrained_concept_emb)
             else:
-                self.emb.weight.data.normal_(mean=0.0, std=init_range)
+                self.emb.weight.data.normal_(mean=0.0, std=initializer_range)
             if freeze_ent_emb:
                 freeze_net(self.emb)
 
@@ -363,9 +363,8 @@ class GreaseLMEncoder(nn.Module):
     def __init__(self, config, dropout=0.2):
         super().__init__()
         self.config = config
-        self.k = config.k
         self.edge_encoder = torch.nn.Sequential(
-            torch.nn.Linear(config.n_etype + 1 + config.n_ntype * 2, config.gnn_hidden_size),
+            torch.nn.Linear(config.num_edge_types + 1 + config.num_node_types * 2, config.gnn_hidden_size),
             torch.nn.BatchNorm1d(config.gnn_hidden_size),
             torch.nn.ReLU(),
             torch.nn.Linear(config.gnn_hidden_size, config.gnn_hidden_size),
@@ -374,8 +373,8 @@ class GreaseLMEncoder(nn.Module):
         self.layer = nn.ModuleList([GreaseLMLayer(config) for _ in range(config.num_hidden_layers)])
         self.gnn_layers = nn.ModuleList(
             [
-                GATConvE(config.gnn_hidden_size, config.n_ntype, config.n_etype, self.edge_encoder)
-                for _ in range(config.k)
+                GATConvE(config.gnn_hidden_size, config.num_node_types, config.num_edge_types, self.edge_encoder)
+                for _ in range(config.num_gnn_layers)
             ]
         )
         self.activation = ACT2FN["gelu_new"]
@@ -392,7 +391,7 @@ class GreaseLMEncoder(nn.Module):
                         config.ie_layer_num,
                         config.p_fc,
                     )
-                    for _ in range(config.k)
+                    for _ in range(config.num_gnn_layers)
                 ]
             )
         else:
@@ -458,16 +457,17 @@ class GreaseLMEncoder(nn.Module):
             if output_attentions:
                 all_attentions = all_attentions + (layer_outputs[1],)
 
-            if i >= self.num_hidden_layers - self.k:
+            if i >= self.num_hidden_layers - self.config.num_gnn_layers:
                 # GNN
-                gnn_layer_index = i - self.num_hidden_layers + self.k
+                gnn_layer_index = i - self.num_hidden_layers + self.config.num_gnn_layers
                 _X = self.gnn_layers[gnn_layer_index](_X, edge_index, edge_type, _node_type, _node_feature_extra)
                 _X = self.activation(_X)
                 _X = F.dropout(_X, self.dropout_rate, training=self.training)
 
                 # Exchange info between LM and GNN hidden states (Modality interaction)
-                if self.info_exchange == True or (
-                    self.info_exchange == "every-other-layer" and (i - self.num_hidden_layers + self.k) % 2 == 0
+                if self.info_exchange or (
+                    self.info_exchange == "every-other-layer"
+                    and (i - self.num_hidden_layers + self.config.num_gnn_layers) % 2 == 0
                 ):
                     X = _X.view(bs, -1, _X.size(1))  # [bs, max_num_nodes, node_dim]
                     context_node_lm_feats = hidden_states[:, 0, :]  # [bs, sent_dim]
@@ -1064,7 +1064,7 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         pretrained_concept_emb = torch.tensor(np.load(pretrained_concept_emb_file), dtype=torch.float)
         concept_num, concept_in_dim = pretrained_concept_emb.size(0), pretrained_concept_emb.size(1)
         self.hidden_size = config.concept_dim
-        self.emb_node_type = nn.Linear(config.n_ntype, config.concept_dim // 2)
+        self.emb_node_type = nn.Linear(config.num_node_types, config.concept_dim // 2)
 
         self.basis_f = "sin"  # ['id', 'linact', 'sin', 'none']
         if self.basis_f in ["id"]:
@@ -1081,17 +1081,18 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         self.activation = ACT2FN["gelu_new"]
         self.dropout = nn.Dropout(dropout)
         self.dropout_e = nn.Dropout(dropout)
-        self.cpnet_vocab_size = config.n_concept
+        self.cpnet_vocab_size = concept_num
         self.concept_emb = (
             CustomizedEmbedding(
-                concept_num=config.n_concept,
+                concept_num=concept_num,
                 concept_out_dim=config.concept_dim,
                 use_contextualized=False,
-                concept_in_dim=config.concept_in_dim,
+                concept_in_dim=concept_in_dim,
                 pretrained_concept_emb=pretrained_concept_emb,
                 freeze_ent_emb=freeze_ent_emb,
+                initializer_range=config.initializer_range,
             )
-            if config.k >= 0
+            if config.num_gnn_layers >= 0
             else None
         )
         self.embeddings = GreaseLMEmbeddings(config)
@@ -1311,8 +1312,8 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         _batch_size, _n_nodes = node_type_ids.size()
 
         # Embed type
-        T = make_one_hot(node_type_ids.view(-1).contiguous(), self.config.n_ntype).view(
-            _batch_size, _n_nodes, self.config.n_ntype
+        T = make_one_hot(node_type_ids.view(-1).contiguous(), self.config.num_node_types).view(
+            _batch_size, _n_nodes, self.config.num_node_types
         )
         node_type_emb = self.activation(self.emb_node_type(T))  # [batch_size, n_node, dim/2]
 
@@ -1378,13 +1379,12 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
     GREASELM_START_DOCSTRING,
 )
 class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
-
     def __init__(self, config, pretrained_concept_emb_file=None):
         super().__init__(config)
         self.greaselm = GreaseLMModel(config, pretrained_concept_emb_file=pretrained_concept_emb_file)
         self.pooler = (
-            MultiheadAttPoolLayer(config.n_attention_head, config.hidden_size, config.concept_dim)
-            if config.k >= 0
+            MultiheadAttPoolLayer(config.num_lm_gnn_attention_heads, config.hidden_size, config.concept_dim)
+            if config.num_gnn_layers >= 0
             else None
         )
 
@@ -1404,7 +1404,9 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
                 repo_id=pretrained_model_name_or_path, filename=_CONCEPT_EMBEDDINGS_FILE_NAME, **kwargs
             )
         kwargs["pretrained_concept_emb_file"] = concept_emb
-        return super(GreaseLMForMultipleChoice, cls).from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+        return super(GreaseLMForMultipleChoice, cls).from_pretrained(
+            pretrained_model_name_or_path, *model_args, **kwargs
+        )
 
     def forward(
         self,

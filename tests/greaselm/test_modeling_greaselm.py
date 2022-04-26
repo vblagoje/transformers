@@ -28,10 +28,7 @@ from ..test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor, 
 if is_torch_available():
     import torch
 
-    from transformers import (
-        GreaseLMForMultipleChoice,
-        GreaseLMModel,
-    )
+    from transformers import GreaseLMForMultipleChoice, GreaseLMModel
     from transformers.models.greaselm.modeling_greaselm import (
         GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
         GreaseLMEmbeddings,
@@ -348,7 +345,6 @@ class GreaseLMModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCa
 
 @require_torch
 class GreaseLMModelIntegrationTest(TestCasePlus):
-
     @slow
     def test_inference_no_head(self):
         model = GreaseLMModel.from_pretrained("vblagoje/greaselm")
