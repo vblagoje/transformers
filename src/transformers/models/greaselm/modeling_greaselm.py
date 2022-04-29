@@ -1500,9 +1500,14 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         # GNN outputs
         Z_vecs = gnn_output[:, 0]  # (batch_size, dim_node)
 
-        mask = torch.arange(node_type_ids.size(-1), device=node_type_ids.device) >= adj_lengths[0, ...].unsqueeze(-1)
+        # Flatten first two dimensions (batch_size, number_of_choices)
+        node_type_ids = torch.flatten(node_type_ids, start_dim=0, end_dim=1)
+        # Flatten adj_lengths
+        adj_lengths = torch.flatten(adj_lengths)
 
-        mask = mask | (node_type_ids[0, ...] == 3)  # pool over all KG nodes (excluding the context node)
+        # Masking
+        mask = torch.arange(node_type_ids.size(-1), device=node_type_ids.device) >= adj_lengths.unsqueeze(dim=1)
+        mask = mask | (node_type_ids == 3)  # pool over all KG nodes (excluding the context node)
         mask[mask.all(1), 0] = 0  # a temporary solution to avoid zero node
 
         graph_vecs, pool_attn = self.pooler(sent_vecs, gnn_output, mask)
