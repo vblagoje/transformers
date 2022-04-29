@@ -64,6 +64,36 @@ class GreaseLMModelTester:
         self.num_choices = 5
         self.scope = None
 
+    def prepare_inputs_for_encoder(self):
+        hidden_states = torch.zeros([self.batch_size, self.seq_length, self.sent_dim]).to(torch_device)
+        attention_mask = torch.zeros([self.batch_size, 1, 1, self.seq_length]).to(torch_device)
+        head_mask = [None] * self.num_hidden_layers
+
+        special_tokens_mask = torch.zeros([self.batch_size, self.seq_length]).to(torch_device)
+
+        n_node = 200
+        _X = torch.zeros([self.batch_size * n_node, self.concept_dim]).to(torch_device)
+        n_edges = 3
+        edge_index = torch.tensor([[1, 2, 3], [4, 5, 6]]).to(torch_device)
+        edge_type = torch.zeros(n_edges, dtype=torch.long).fill_(2).to(torch_device)
+        node_type_ids = torch.zeros([self.batch_size, n_node], dtype=torch.long).to(torch_device)
+        node_type_ids[:, 0] = 3
+        node_type_ids = node_type_ids.view(-1)
+        node_feature_extra = torch.zeros([self.batch_size * n_node, self.concept_dim]).to(torch_device)
+        special_nodes_mask = torch.zeros([self.batch_size, n_node], dtype=torch.bool).to(torch_device)
+        return (
+            hidden_states,
+            attention_mask,
+            special_tokens_mask,
+            head_mask,
+            _X,
+            edge_index,
+            edge_type,
+            node_type_ids,
+            node_feature_extra,
+            special_nodes_mask,
+        )
+
     def prepare_config_and_inputs(self, add_labels=False):
         input_ids = ids_tensor([self.batch_size, self.num_choices, self.seq_length], self.vocab_size)
 
@@ -92,7 +122,9 @@ class GreaseLMModelTester:
         node_scores = torch.zeros([self.batch_size, self.num_choices, n_node, 1]).to(torch_device)
         node_scores[:, :, 1] = 180
 
-        special_nodes_mask = torch.zeros([self.batch_size, self.num_choices, n_node], dtype=torch.long).to(torch_device)
+        special_nodes_mask = torch.zeros([self.batch_size, self.num_choices, n_node], dtype=torch.long).to(
+            torch_device
+        )
 
         config = self.get_config()
         if add_labels:
@@ -175,6 +207,36 @@ class GreaseLMModelTester:
             edge_type,
         )
 
+    def create_and_check_encoder(
+        self,
+        hidden_states,
+        attention_mask,
+        special_tokens_mask,
+        head_mask,
+        H,
+        edge_index,
+        edge_type,
+        node_type_ids,
+        node_feature_extra,
+        special_nodes_mask,
+    ):
+        concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
+        model = GreaseLMModel(config=self.get_config(), pretrained_concept_emb_file=concept_emb)
+        model.to(torch_device)
+        model.eval()
+        result = model.encoder(
+            hidden_states,
+            attention_mask,
+            special_tokens_mask,
+            head_mask,
+            H,
+            edge_index,
+            edge_type,
+            node_type_ids,
+            node_feature_extra,
+            special_nodes_mask,
+        )
+
     def create_and_check_for_multiple_choice(
         self,
         config,
@@ -249,6 +311,10 @@ class GreaseLMModelTest(unittest.TestCase):
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
+
+    def test_model_encoder(self):
+        inputs = self.model_tester.prepare_inputs_for_encoder()
+        self.model_tester.create_and_check_encoder(*inputs)
 
     def test_for_multiple_choice(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs(add_labels=True)
