@@ -42,8 +42,8 @@ class GreaseLMModelTester:
         parent,
     ):
         self.parent = parent
-        self.batch_size = 13
-        self.seq_length = 7
+        self.batch_size = 3
+        self.seq_length = 128
         self.is_training = True
         self.use_input_mask = True
         self.use_token_type_ids = True
@@ -61,31 +61,71 @@ class GreaseLMModelTester:
         self.type_sequence_label_size = 2
         self.initializer_range = 0.02
         self.num_labels = 3
-        self.num_choices = 4
+        self.num_choices = 5
         self.scope = None
 
-    def prepare_config_and_inputs(self):
-        input_ids = ids_tensor([self.batch_size, self.seq_length], self.vocab_size)
+    def prepare_config_and_inputs(self, add_labels=False):
+        input_ids = ids_tensor([self.batch_size, self.num_choices, self.seq_length], self.vocab_size)
 
         input_mask = None
         if self.use_input_mask:
-            input_mask = random_attention_mask([self.batch_size, self.seq_length])
+            attention_mask = random_attention_mask([self.batch_size, self.num_choices, self.seq_length])
+            output_mask = random_attention_mask([self.batch_size, self.num_choices, self.seq_length])
 
         token_type_ids = None
         if self.use_token_type_ids:
-            token_type_ids = ids_tensor([self.batch_size, self.seq_length], self.type_vocab_size)
+            token_type_ids = ids_tensor([self.batch_size, self.num_choices, self.seq_length], self.type_vocab_size)
 
-        sequence_labels = None
-        token_labels = None
-        choice_labels = None
-        if self.use_labels:
-            sequence_labels = ids_tensor([self.batch_size], self.type_sequence_label_size)
-            token_labels = ids_tensor([self.batch_size, self.seq_length], self.num_labels)
-            choice_labels = ids_tensor([self.batch_size], self.num_choices)
+        n_node = 200
+        concept_ids = torch.arange(end=n_node).repeat(self.batch_size, self.num_choices, 1).to(torch_device)
+        adj_lengths = torch.zeros([self.batch_size, self.num_choices], dtype=torch.long).fill_(10).to(torch_device)
+
+        n_edges = 3
+        edge_index = torch.tensor([[1, 2, 3], [4, 5, 6]]).to(torch_device)
+        edge_type = torch.zeros(n_edges, dtype=torch.long).fill_(2).to(torch_device)
+
+        edge_index = [[edge_index] * self.num_choices] * self.batch_size
+        edge_type = [[edge_type] * self.num_choices] * self.batch_size
+
+        node_type_ids = torch.zeros([self.batch_size, self.num_choices, n_node], dtype=torch.long).to(torch_device)
+        node_type_ids[:, :, 0] = 3
+        node_scores = torch.zeros([self.batch_size, self.num_choices, n_node, 1]).to(torch_device)
+        node_scores[:, :, 1] = 180
+
+        special_nodes_mask = torch.zeros([self.batch_size, self.num_choices, n_node], dtype=torch.long).to(torch_device)
 
         config = self.get_config()
-
-        return config, input_ids, token_type_ids, input_mask, sequence_labels, token_labels, choice_labels
+        if add_labels:
+            return (
+                config,
+                input_ids,
+                attention_mask,
+                token_type_ids,
+                torch.zeros([self.batch_size], dtype=torch.long).to(torch_device),
+                output_mask,
+                concept_ids,
+                node_type_ids,
+                node_scores,
+                adj_lengths,
+                special_nodes_mask,
+                edge_index,
+                edge_type,
+            )
+        else:
+            return (
+                config,
+                input_ids,
+                attention_mask,
+                token_type_ids,
+                output_mask,
+                concept_ids,
+                node_type_ids,
+                node_scores,
+                adj_lengths,
+                special_nodes_mask,
+                edge_index,
+                edge_type,
+            )
 
     def get_config(self):
         return GreaseLMConfig(
@@ -102,98 +142,73 @@ class GreaseLMModelTester:
             initializer_range=self.initializer_range,
         )
 
-    def prepare_config_and_inputs_for_decoder(self):
-        (
-            config,
-            input_ids,
-            token_type_ids,
-            input_mask,
-            sequence_labels,
-            token_labels,
-            choice_labels,
-        ) = self.prepare_config_and_inputs()
-
-        config.is_decoder = True
-        encoder_hidden_states = floats_tensor([self.batch_size, self.seq_length, self.hidden_size])
-        encoder_attention_mask = ids_tensor([self.batch_size, self.seq_length], vocab_size=2)
-
-        return (
-            config,
-            input_ids,
-            token_type_ids,
-            input_mask,
-            sequence_labels,
-            token_labels,
-            choice_labels,
-            encoder_hidden_states,
-            encoder_attention_mask,
-        )
-
     def create_and_check_model(
-        self, config, input_ids, token_type_ids, input_mask, sequence_labels, token_labels, choice_labels
+        self,
+        config,
+        input_ids,
+        attention_mask,
+        token_type_ids,
+        output_mask,
+        concept_ids,
+        node_type_ids,
+        node_scores,
+        adj_lengths,
+        special_nodes_mask,
+        edge_index,
+        edge_type,
     ):
         concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
         model = GreaseLMModel(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
         model.eval()
-        result = model(input_ids, attention_mask=input_mask, token_type_ids=token_type_ids)
-        result = model(input_ids, token_type_ids=token_type_ids)
-        result = model(input_ids)
+        result = model(
+            input_ids,
+            attention_mask,
+            token_type_ids,
+            output_mask,
+            concept_ids,
+            node_type_ids,
+            node_scores,
+            adj_lengths,
+            special_nodes_mask,
+            edge_index,
+            edge_type,
+        )
 
-        self.parent.assertEqual(result.last_hidden_state.shape, (self.batch_size, self.seq_length, self.hidden_size))
-        self.parent.assertEqual(result.pooler_output.shape, (self.batch_size, self.hidden_size))
-
-    def create_and_check_model_as_decoder(
+    def create_and_check_for_multiple_choice(
         self,
         config,
         input_ids,
+        attention_mask,
         token_type_ids,
-        input_mask,
-        sequence_labels,
-        token_labels,
-        choice_labels,
-        encoder_hidden_states,
-        encoder_attention_mask,
-    ):
-        config.add_cross_attention = True
-        model = GreaseLMModel(config)
-        model.to(torch_device)
-        model.eval()
-        result = model(
-            input_ids,
-            attention_mask=input_mask,
-            token_type_ids=token_type_ids,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-        )
-        result = model(
-            input_ids,
-            attention_mask=input_mask,
-            token_type_ids=token_type_ids,
-            encoder_hidden_states=encoder_hidden_states,
-        )
-        result = model(input_ids, attention_mask=input_mask, token_type_ids=token_type_ids)
-        self.parent.assertEqual(result.last_hidden_state.shape, (self.batch_size, self.seq_length, self.hidden_size))
-        self.parent.assertEqual(result.pooler_output.shape, (self.batch_size, self.hidden_size))
-
-    def create_and_check_for_multiple_choice(
-        self, config, input_ids, token_type_ids, input_mask, sequence_labels, token_labels, choice_labels
+        labels,
+        special_tokens_mask,
+        concept_ids,
+        node_type_ids,
+        node_scores,
+        adj_lengths,
+        special_nodes_mask,
+        edge_index,
+        edge_type,
     ):
         config.num_choices = self.num_choices
         concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
         model = GreaseLMForMultipleChoice(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
-        model.eval()
-        multiple_choice_inputs_ids = input_ids.unsqueeze(1).expand(-1, self.num_choices, -1).contiguous()
-        multiple_choice_token_type_ids = token_type_ids.unsqueeze(1).expand(-1, self.num_choices, -1).contiguous()
-        multiple_choice_input_mask = input_mask.unsqueeze(1).expand(-1, self.num_choices, -1).contiguous()
-        result = model(
-            multiple_choice_inputs_ids,
-            attention_mask=multiple_choice_input_mask,
-            token_type_ids=multiple_choice_token_type_ids,
-            labels=choice_labels,
+        model(
+            input_ids,
+            attention_mask,
+            token_type_ids,
+            labels,
+            special_tokens_mask,
+            concept_ids,
+            node_type_ids,
+            node_scores,
+            adj_lengths,
+            special_nodes_mask,
+            edge_index,
+            edge_type,
         )
-        self.parent.assertEqual(result.logits.shape, (self.batch_size, self.num_choices))
 
     def prepare_config_and_inputs_for_common(self):
         config_and_inputs = self.prepare_config_and_inputs()
@@ -235,46 +250,8 @@ class GreaseLMModelTest(unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
 
-    def test_model_various_embeddings(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs()
-        for type in ["absolute", "relative_key", "relative_key_query"]:
-            config_and_inputs[0].position_embedding_type = type
-            self.model_tester.create_and_check_model(*config_and_inputs)
-
-    def test_model_as_decoder(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
-        self.model_tester.create_and_check_model_as_decoder(*config_and_inputs)
-
-    def test_model_as_decoder_with_default_input_mask(self):
-        # This regression test was failing with PyTorch < 1.3
-        (
-            config,
-            input_ids,
-            token_type_ids,
-            input_mask,
-            sequence_labels,
-            token_labels,
-            choice_labels,
-            encoder_hidden_states,
-            encoder_attention_mask,
-        ) = self.model_tester.prepare_config_and_inputs_for_decoder()
-
-        input_mask = None
-
-        self.model_tester.create_and_check_model_as_decoder(
-            config,
-            input_ids,
-            token_type_ids,
-            input_mask,
-            sequence_labels,
-            token_labels,
-            choice_labels,
-            encoder_hidden_states,
-            encoder_attention_mask,
-        )
-
     def test_for_multiple_choice(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        config_and_inputs = self.model_tester.prepare_config_and_inputs(add_labels=True)
         self.model_tester.create_and_check_for_multiple_choice(*config_and_inputs)
 
     @slow
@@ -283,64 +260,9 @@ class GreaseLMModelTest(unittest.TestCase):
             model = GreaseLMModel.from_pretrained(model_name)
             self.assertIsNotNone(model)
 
-    def test_create_position_ids_respects_padding_index(self):
-        """Ensure that the default position ids only assign a sequential . This is a regression
-        test for https://github.com/huggingface/transformers/issues/1761
-
-        The position ids should be masked with the embedding object's padding index. Therefore, the
-        first available non-padding position index is GreaseLMEmbeddings.padding_idx + 1
-        """
-        config = self.model_tester.prepare_config_and_inputs()[0]
-        model = GreaseLMEmbeddings(config=config)
-
-        input_ids = torch.as_tensor([[12, 31, 13, model.padding_idx]])
-        expected_positions = torch.as_tensor(
-            [[0 + model.padding_idx + 1, 1 + model.padding_idx + 1, 2 + model.padding_idx + 1, model.padding_idx]]
-        )
-
-        position_ids = create_position_ids_from_input_ids(input_ids, model.padding_idx)
-        self.assertEqual(position_ids.shape, expected_positions.shape)
-        self.assertTrue(torch.all(torch.eq(position_ids, expected_positions)))
-
-    def test_create_position_ids_from_inputs_embeds(self):
-        """Ensure that the default position ids only assign a sequential . This is a regression
-        test for https://github.com/huggingface/transformers/issues/1761
-
-        The position ids should be masked with the embedding object's padding index. Therefore, the
-        first available non-padding position index is GreaseLMEmbeddings.padding_idx + 1
-        """
-        config = self.model_tester.prepare_config_and_inputs()[0]
-        embeddings = GreaseLMEmbeddings(config=config)
-
-        inputs_embeds = torch.empty(2, 4, 30)
-        expected_single_positions = [
-            0 + embeddings.padding_idx + 1,
-            1 + embeddings.padding_idx + 1,
-            2 + embeddings.padding_idx + 1,
-            3 + embeddings.padding_idx + 1,
-        ]
-        expected_positions = torch.as_tensor([expected_single_positions, expected_single_positions])
-        position_ids = embeddings.create_position_ids_from_inputs_embeds(inputs_embeds)
-        self.assertEqual(position_ids.shape, expected_positions.shape)
-        self.assertTrue(torch.all(torch.eq(position_ids, expected_positions)))
-
 
 @require_torch
 class GreaseLMModelIntegrationTest(TestCasePlus):
     @slow
     def test_inference_no_head(self):
         model = GreaseLMModel.from_pretrained("vblagoje/greaselm")
-
-        input_ids = torch.tensor([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]])
-        with torch.no_grad():
-            output = model(input_ids)[0]
-        # compare the actual values for a slice.
-        expected_slice = torch.tensor(
-            [[[-0.0231, 0.0782, 0.0074], [-0.1854, 0.0540, -0.0175], [0.0548, 0.0799, 0.1687]]]
-        )
-
-        # greaselm = torch.hub.load('pytorch/fairseq', 'greaselm.base')
-        # greaselm.eval()
-        # expected_slice = greaselm.extract_features(input_ids)[:, :3, :3].detach()
-
-        self.assertTrue(torch.allclose(output[:, :3, :3], expected_slice, atol=1e-4))
