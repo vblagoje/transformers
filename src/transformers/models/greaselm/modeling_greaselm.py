@@ -26,9 +26,9 @@ import torch.utils.checkpoint
 from packaging import version
 from torch import nn
 from torch.autograd import Variable
+from torch.nn import CrossEntropyLoss
 
 from huggingface_hub import hf_hub_download
-from torch.nn import CrossEntropyLoss
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
 from torch_scatter import scatter
@@ -1414,7 +1414,6 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         input_ids,
         attention_mask,
         token_type_ids,
-        labels,
         special_tokens_mask,
         concept_ids,
         node_type_ids,
@@ -1423,6 +1422,7 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         special_nodes_mask,
         edge_index,
         edge_type,
+        labels=None,
         emb_data=None,
         detail=False,
         cache_output=False,
@@ -1437,11 +1437,6 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         :param token_type_ids:
               (:obj:`torch.LongTensor` of shape :obj:`(batch_size, number_of_choices, seq_len)`):
                    Token type ids for the language model.
-        :param labels:
-              (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-                   Labels for computing the multiple choice classification loss. Indices should be in `[0, ...,
-                   num_choices-1]` where `num_choices` is the size of the second dimension of the input tensors. (See
-                   `input_ids` above)
         :param special_tokens_mask:
               (:obj:`torch.LongTensor` of shape :obj:`(batch_size, number_of_choices, seq_len)`):
                    Output mask for the language model.
@@ -1465,6 +1460,11 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
                torch.tensor(2, E)) where E is the total number of edges in the particular graph.
         :param edge_type:
                torch.tensor(E, ) where E is the total number of edges in the particular graph.
+        :param labels:
+              (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+                   Labels for computing the multiple choice classification loss. Indices should be in `[0, ...,
+                   num_choices-1]` where `num_choices` is the size of the second dimension of the input tensors. (See
+                   `input_ids` above)
         :param emb_data:
                torch.tensor(batch_size, number_of_choices, max_node_num, emb_dim)
         :param detail:
