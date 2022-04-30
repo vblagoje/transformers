@@ -204,7 +204,12 @@ _import_structure = {
     "models.gpt2": ["GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPT2Config", "GPT2Tokenizer"],
     "models.gpt_neo": ["GPT_NEO_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPTNeoConfig"],
     "models.gptj": ["GPTJ_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPTJConfig"],
-    "models.greaselm": ["GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP", "GreaseLMConfig"],
+    "models.greaselm": [
+        "GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP",
+        "GreaseLMConfig",
+        "GreaseLMFeatureExtractor",
+        "GreaseLMProcessor",
+    ],
     "models.herbert": ["HerbertTokenizer"],
     "models.hubert": ["HUBERT_PRETRAINED_CONFIG_ARCHIVE_MAP", "HubertConfig"],
     "models.ibert": ["IBERT_PRETRAINED_CONFIG_ARCHIVE_MAP", "IBertConfig"],
@@ -1080,17 +1085,11 @@ if is_torch_available():
     _import_structure["models.greaselm"].extend(
         [
             "GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "GreaseLMFeatureExtractor",
             "GreaseLMForMultipleChoice",
             "GreaseLMModel",
             "GreaseLMPreTrainedModel",
-        ]
-    )
-    _import_structure["models.greaselm"].extend(
-        [
-            "GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
-            "GreaseLMForMultipleChoice",
-            "GreaseLMModel",
-            "GreaseLMPreTrainedModel",
+            "GreaseLMProcessor",
         ]
     )
     _import_structure["models.hubert"].extend(
@@ -2674,7 +2673,12 @@ if TYPE_CHECKING:
     from .models.gpt2 import GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP, GPT2Config, GPT2Tokenizer
     from .models.gpt_neo import GPT_NEO_PRETRAINED_CONFIG_ARCHIVE_MAP, GPTNeoConfig
     from .models.gptj import GPTJ_PRETRAINED_CONFIG_ARCHIVE_MAP, GPTJConfig
-    from .models.greaselm import GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP, GreaseLMConfig
+    from .models.greaselm import (
+        GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP,
+        GreaseLMConfig,
+        GreaseLMFeatureExtractor,
+        GreaseLMProcessor,
+    )
     from .models.herbert import HerbertTokenizer
     from .models.hubert import HUBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, HubertConfig
     from .models.ibert import IBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, IBertConfig
@@ -3415,9 +3419,11 @@ if TYPE_CHECKING:
         )
         from .models.greaselm import (
             GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
+            GreaseLMFeatureExtractor,
             GreaseLMForMultipleChoice,
             GreaseLMModel,
             GreaseLMPreTrainedModel,
+            GreseLMProcessor,
         )
         from .models.hubert import (
             HUBERT_PRETRAINED_MODEL_ARCHIVE_LIST,

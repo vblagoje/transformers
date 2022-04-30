@@ -26,23 +26,27 @@ _import_structure = {
 }
 
 if is_torch_available():
+    _import_structure["feature_extraction_greaselm"] = ["GreaseLMFeatureExtractor"]
     _import_structure["modeling_greaselm"] = [
         "GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
         "GreaseLMForMultipleChoice",
         "GreaseLMModel",
         "GreaseLMPreTrainedModel",
     ]
+    _import_structure["processing_greaselm"] = ["GreaseLMProcessor"]
 
 if TYPE_CHECKING:
     from .configuration_greaselm import GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP, GreaseLMConfig, GreaseLMOnnxConfig
 
     if is_torch_available():
+        from .feature_extraction_greaselm import GreaseLMFeatureExtractor
         from .modeling_greaselm import (
             GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
             GreaseLMForMultipleChoice,
             GreaseLMModel,
             GreaseLMPreTrainedModel,
         )
+        from .processing_greaselm import GreaseLMProcessor
 
 else:
     import sys
