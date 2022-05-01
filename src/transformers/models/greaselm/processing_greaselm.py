@@ -15,7 +15,8 @@
 """
 Processor class for GreaseLM
 """
-from typing import Any, Dict, List
+from collections import UserDict
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 
@@ -72,7 +73,7 @@ class GreaseLMProcessor(ProcessorMixin):
             features, self.max_node_num, [], num_choices
         )
 
-        return BatchEncoding(data={**lm_encoding, **kg_encoding}, tensor_type=None)
+        return KGEncoding(data={**lm_encoding, **kg_encoding})
 
     def encode_question_answer_example(self, entailed_qa_examples: List[Dict[str, Any]]):
         class InputExample(object):
@@ -136,10 +137,17 @@ class GreaseLMProcessor(ProcessorMixin):
         all_attention_mask = torch.stack([f["choices"]["attention_mask"] for f in features], dim=0)
         all_special_tokens_mask = torch.stack([f["choices"]["special_tokens_mask"] for f in features], dim=0)
         num_choices = all_inputs_ids.shape[1]  # second dim represents number of choices
-        return example_ids, num_choices, dict(input_ids=all_inputs_ids, token_type_ids=all_token_type_ids,
-                                              attention_mask=all_attention_mask,
-                                              special_tokens_mask=all_special_tokens_mask,
-                                              labels=all_label)
+        return (
+            example_ids,
+            num_choices,
+            dict(
+                input_ids=all_inputs_ids,
+                token_type_ids=all_token_type_ids,
+                attention_mask=all_attention_mask,
+                special_tokens_mask=all_special_tokens_mask,
+                labels=all_label,
+            ),
+        )
 
     def batch_decode(self, *args, **kwargs):
         """
@@ -154,3 +162,41 @@ class GreaseLMProcessor(ProcessorMixin):
         to the docstring of this method for more information.
         """
         return self.tokenizer.decode(*args, **kwargs)
+
+
+class KGEncoding(UserDict):
+    def __init__(self, data: Optional[Dict[str, Any]] = None):
+        super().__init__(data)
+
+    def keys(self):
+        return self.data.keys()
+
+    def values(self):
+        return self.data.values()
+
+    def items(self):
+        return self.data.items()
+
+    def _to_device(self, obj, device):
+        if isinstance(obj, (tuple, list)):
+            return [self._to_device(item, device) for item in obj]
+        else:
+            return obj.to(device)
+
+    def to(self, device: Union[str, "torch.device"]) -> "BatchEncoding":
+        """
+        Args:
+        Send all values to device by calling `v.to(device)` (PyTorch only).
+            device (`str` or `torch.device`): The device to put the tensors on.
+        Returns:
+            [`KGEncoding`]: The same instance after modification.
+        """
+
+        # This check catches things like APEX blindly calling "to" on all inputs to a module
+        # Otherwise it passes the casts down and casts the LongTensor containing the token idxs
+        # into a HalfTensor
+        if isinstance(device, str) or isinstance(device, torch.device) or isinstance(device, int):
+            self.data = {k: self._to_device(obj=v, device=device) for k, v in self.data.items()}
+        else:
+            raise TypeError(f"device must be a str, torch.device, or int, got {type(device)}")
+        return self
