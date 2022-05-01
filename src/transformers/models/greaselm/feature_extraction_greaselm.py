@@ -597,9 +597,8 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             result.append(final_item)
         return result
 
-    def load_sparse_adj_data_with_contextnode(
-        self, adj_concept_pairs, max_node_num, concepts_by_sents_list, num_choices
-    ) -> Dict[str, Any]:
+    def load_sparse_adj_data_with_contextnode(self, adj_concept_pairs, num_choices,
+                                              concepts_by_sents_list) -> Dict[str, Any]:
         """Construct input tensors for the GNN component of the model."""
         # Set special nodes and links
         context_node = 0
@@ -614,10 +613,10 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         n_samples = len(adj_concept_pairs)  # this is actually n_questions x n_choices
         edge_index, edge_type = [], []
         adj_lengths = torch.zeros((n_samples,), dtype=torch.long)
-        concept_ids = torch.full((n_samples, max_node_num), 1, dtype=torch.long)
-        node_type_ids = torch.full((n_samples, max_node_num), 2, dtype=torch.long)  # default 2: "other node"
-        node_scores = torch.zeros((n_samples, max_node_num, 1), dtype=torch.float)
-        special_nodes_mask = torch.zeros(n_samples, max_node_num, dtype=torch.bool)
+        concept_ids = torch.full((n_samples, self.max_node_num), 1, dtype=torch.long)
+        node_type_ids = torch.full((n_samples, self.max_node_num), 2, dtype=torch.long)  # default 2: "other node"
+        node_scores = torch.zeros((n_samples, self.max_node_num, 1), dtype=torch.float)
+        special_nodes_mask = torch.zeros(n_samples, self.max_node_num, dtype=torch.bool)
 
         adj_lengths_ori = adj_lengths.clone()
         if not concepts_by_sents_list:
@@ -633,10 +632,10 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
                 _data["cid2score"],
             )
 
-            assert n_special_nodes <= max_node_num
+            assert n_special_nodes <= self.max_node_num
             special_nodes_mask[idx, :n_special_nodes] = 1
             num_concept = min(
-                len(concepts) + n_special_nodes, max_node_num
+                len(concepts) + n_special_nodes, self.max_node_num
             )  # this is the final number of nodes including contextnode but excluding PAD
             adj_lengths_ori[idx] = len(concepts)
             adj_lengths[idx] = num_concept
@@ -710,7 +709,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
                 k = torch.cat([k, torch.tensor(extra_k)], dim=0)
             ########################
 
-            mask = (j < max_node_num) & (k < max_node_num)
+            mask = (j < self.max_node_num) & (k < self.max_node_num)
             i, j, k = i[mask], j[mask], k[mask]
             i, j, k = (
                 torch.cat((i, i + half_n_rel), 0),
@@ -730,11 +729,11 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             for x in (concept_ids, node_type_ids, node_scores, adj_lengths, special_nodes_mask)
         ]
 
-        # concept_ids: (n_questions, num_choice, max_node_num)
-        # node_type_ids: (n_questions, num_choice, max_node_num)
-        # node_scores: (n_questions, num_choice, max_node_num, 1)
+        # concept_ids: (n_questions, num_choice, self.max_node_num)
+        # node_type_ids: (n_questions, num_choice, self.max_node_num)
+        # node_scores: (n_questions, num_choice, self.max_node_num, 1)
         # adj_lengths: (n_questions,　num_choice)
-        # special_nodes_mask: (n_questions, num_choice, max_node_num)
+        # special_nodes_mask: (n_questions, num_choice, self.max_node_num)
 
         # edge_index: list of size (n_questions, n_choices), where each entry is tensor[2, E]
         # edge_type: list of size (n_questions, n_choices), where each entry is tensor[E, ]

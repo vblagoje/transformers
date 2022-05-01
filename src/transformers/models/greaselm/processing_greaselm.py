@@ -43,11 +43,10 @@ class GreaseLMProcessor(ProcessorMixin):
     feature_extractor_class = "GreaseLMFeatureExtractor"
     tokenizer_class = ("RobertaTokenizer", "RobertaTokenizerFast")
 
-    def __init__(self, feature_extractor, tokenizer):
+    def __init__(self, feature_extractor, tokenizer, max_seq_length=128):
         super().__init__(feature_extractor, tokenizer)
         self.current_processor = self.feature_extractor
-        self.max_node_num = 200
-        self.max_seq_length = 512
+        self.max_seq_length = max_seq_length
         self.current_processor.start()
 
     def __call__(self, question_answer_example: List[Dict[str, Any]], return_tensors=None, **kwargs):
@@ -69,9 +68,7 @@ class GreaseLMProcessor(ProcessorMixin):
         # Load adj data
         features = self.current_processor(question_answer_example, entailed_qa)
 
-        kg_encoding: Dict[str, Any] = self.current_processor.load_sparse_adj_data_with_contextnode(
-            features, self.max_node_num, [], num_choices
-        )
+        kg_encoding = self.current_processor.load_sparse_adj_data_with_contextnode(features, num_choices, None)
 
         return KGEncoding(data={**lm_encoding, **kg_encoding})
 
