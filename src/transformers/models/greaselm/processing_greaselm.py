@@ -67,7 +67,7 @@ class GreaseLMProcessor(ProcessorMixin):
         assert len(qids) == len(question_answer_example)
 
         # Load adj data
-        features = self.current_processor(question_answer_example[0])
+        features = self.current_processor(question_answer_example, entailed_qa)
 
         kg_encoding: Dict[str, Any] = self.current_processor.load_sparse_adj_data_with_contextnode(
             features, self.max_node_num, [], num_choices

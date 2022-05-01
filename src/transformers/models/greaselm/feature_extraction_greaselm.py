@@ -171,7 +171,8 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
     def __call__(
         self,
-        question_answer_example: Dict[str, Any],
+        question_answer_example: List[Dict[str, Any]],
+        entailed_question_answer_example: List[Dict[str, Any]],
         return_tensors: Optional[Union[str, TensorType]] = None,
         **kwargs
     ) -> BatchFeature:
@@ -204,12 +205,12 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
             - **pixel_values** -- Pixel values to be fed to a model.
         """
-        entailed_statement = convert_qajson_to_entailment(question_answer_example)
-        grouned_statements = self.ground(entailed_statement)
-        result = self.generate_adj_data_from_grounded_concepts__use_lm(question_answer_example, grouned_statements)
-
-        # TODO: still need to prepare this result for model input
-        return result
+        results = []
+        for question_answer_example, entailed_statement in zip(question_answer_example, entailed_question_answer_example):
+            grouned_statements = self.ground(entailed_statement)
+            result = self.generate_adj_data_from_grounded_concepts__use_lm(question_answer_example, grouned_statements)
+            results.extend(result)
+        return results
 
     @classmethod
     def from_pretrained(
