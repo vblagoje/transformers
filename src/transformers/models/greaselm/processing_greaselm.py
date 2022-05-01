@@ -60,26 +60,19 @@ class GreaseLMProcessor(ProcessorMixin):
               `None`).
         """
 
-        entailed_qa = convert_qajson_to_entailment(question_answer_example[0])
-        qids, labels, encoder_data, concepts_by_sents_list = self.encode_question_answer_example([entailed_qa])
-        lm_encoding = dict(
-            input_ids=encoder_data[0],
-            attention_mask=encoder_data[1],
-            token_type_ids=encoder_data[2],
-            special_tokens_mask=encoder_data[3],
-        )
+        entailed_qa = [convert_qajson_to_entailment(e) for e in question_answer_example]
+        qids, num_choices, lm_encoding = self.encode_question_answer_example(entailed_qa)
+        assert num_choices > 0
+        assert len(qids) == len(question_answer_example)
 
         # Load adj data
         features = self.current_processor(question_answer_example[0])
-        num_choices = encoder_data[0].size(1)
-        assert num_choices > 0
 
         kg_encoding: Dict[str, Any] = self.current_processor.load_sparse_adj_data_with_contextnode(
-            features, self.max_node_num, concepts_by_sents_list, num_choices
+            features, self.max_node_num, [], num_choices
         )
 
-        # add qids, labels, to batch encoding
-        return BatchEncoding(data={**lm_encoding, **kg_encoding}, tensor_type=return_tensors)
+        return BatchEncoding(data={**lm_encoding, **kg_encoding}, tensor_type=None)
 
     def encode_question_answer_example(self, entailed_qa_examples: List[Dict[str, Any]]):
         class InputExample(object):
@@ -90,21 +83,7 @@ class GreaseLMProcessor(ProcessorMixin):
                 self.endings = endings
                 self.label = label
 
-        class InputFeatures(object):
-            def __init__(self, example_id, choices_features, label):
-                self.example_id = example_id
-                self.choices_features = [
-                    {
-                        "input_ids": input_ids,
-                        "input_mask": input_mask,
-                        "segment_ids": segment_ids,
-                        "output_mask": output_mask,
-                    }
-                    for input_ids, input_mask, segment_ids, output_mask in choices_features
-                ]
-                self.label = label
-
-        def read_examples(qa_entailed_statements: List[Dict[str, Any]]):
+        def read_examples(qa_entailed_statements: List[Dict[str, Any]]) -> List[InputExample]:
             examples = []
             for json_dic in qa_entailed_statements:
                 label = ord(json_dic["answerKey"]) - ord("A") if "answerKey" in json_dic else 0
@@ -125,64 +104,42 @@ class GreaseLMProcessor(ProcessorMixin):
 
             return examples
 
-        def simple_convert_examples_to_features(examples, label_list):
-            """Loads a data file into a list of `InputBatch`s
-            `cls_token_at_end` define the location of the CLS token:
-                - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
-                - True (XLNet/GPT pattern): A + [SEP] + B + [SEP] + [CLS]
-            `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
-            """
+        def examples_to_features(examples: List[InputExample], label_list: List[int]) -> List[Dict[str, Any]]:
             label_map = {label: i for i, label in enumerate(label_list)}
 
             features = []
-            concepts_by_sents_list = []
-            for ex_index, example in tqdm(
-                enumerate(examples), total=len(examples), desc="Converting examples to features"
-            ):
-                choices_features = []
-                for ending_idx, (context, ending) in enumerate(zip(example.contexts, example.endings)):
+            for idx, example in tqdm(enumerate(examples), total=len(examples)):
+                choices = []
+                for context, ending in zip(example.contexts, example.endings):
                     ans = example.question + " " + ending
-
-                    encoded_input = self.tokenizer(
-                        context,
-                        ans,
-                        padding="max_length",
-                        truncation=True,
-                        max_length=self.max_seq_length,
-                        return_token_type_ids=True,
-                        return_special_tokens_mask=True,
-                    )
-                    input_ids = encoded_input["input_ids"]
-                    output_mask = encoded_input["special_tokens_mask"]
-                    input_mask = encoded_input["attention_mask"]
-                    segment_ids = encoded_input["token_type_ids"]
-
-                    choices_features.append((input_ids, input_mask, segment_ids, output_mask))
-                label = label_map[example.label]
-                features.append(
-                    InputFeatures(example_id=example.example_id, choices_features=choices_features, label=label)
+                    choices.append((context, ans))
+                encoded_input = self.tokenizer(
+                    choices,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=self.max_seq_length,
+                    return_token_type_ids=True,
+                    return_tensors="pt",
+                    return_special_tokens_mask=True,
                 )
+                label = label_map[example.label]
+                features.append({"id": example.example_id, "choices": encoded_input, "label": label})
 
-            return features, concepts_by_sents_list
-
-        def select_field(features, field):
-            return [[choice[field] for choice in feature.choices_features] for feature in features]
-
-        def convert_features_to_tensors(features):
-            all_input_ids = torch.tensor(select_field(features, "input_ids"), dtype=torch.long)
-            all_input_mask = torch.tensor(select_field(features, "input_mask"), dtype=torch.long)
-            all_segment_ids = torch.tensor(select_field(features, "segment_ids"), dtype=torch.long)
-            all_output_mask = torch.tensor(select_field(features, "output_mask"), dtype=torch.bool)
-            all_label = torch.tensor([f.label for f in features], dtype=torch.long)
-            return all_input_ids, all_input_mask, all_segment_ids, all_output_mask, all_label
+            return features
 
         examples = read_examples(entailed_qa_examples)
-        features, concepts_by_sents_list = simple_convert_examples_to_features(
-            examples, list(range(len(examples[0].endings)))
-        )
-        example_ids = [f.example_id for f in features]
-        *data_tensors, all_label = convert_features_to_tensors(features)
-        return example_ids, all_label, data_tensors, concepts_by_sents_list
+        features = examples_to_features(examples, list(range(len(examples[0].endings))))
+        example_ids = [f["id"] for f in features]
+        all_label = torch.tensor([f["label"] for f in features], dtype=torch.long)
+        all_inputs_ids = torch.stack([f["choices"]["input_ids"] for f in features], dim=0)
+        all_token_type_ids = torch.stack([f["choices"]["token_type_ids"] for f in features], dim=0)
+        all_attention_mask = torch.stack([f["choices"]["attention_mask"] for f in features], dim=0)
+        all_special_tokens_mask = torch.stack([f["choices"]["special_tokens_mask"] for f in features], dim=0)
+        num_choices = all_inputs_ids.shape[1]  # second dim represents number of choices
+        return example_ids, num_choices, dict(input_ids=all_inputs_ids, token_type_ids=all_token_type_ids,
+                                              attention_mask=all_attention_mask,
+                                              special_tokens_mask=all_special_tokens_mask,
+                                              labels=all_label)
 
     def batch_decode(self, *args, **kwargs):
         """
