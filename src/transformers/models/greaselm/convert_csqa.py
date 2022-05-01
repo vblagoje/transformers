@@ -27,32 +27,18 @@ JSONL format of files
 
 import json
 import re
+from typing import Any, Dict
 
 from tqdm import tqdm
 
 
-__all__ = ["convert_to_entailment"]
+__all__ = ["convert_qajson_to_entailment"]
 
 # String used to indicate a blank
 BLANK_STR = "___"
 
 
-def convert_to_entailment(qa_file: str, output_file: str, ans_pos: bool = False):
-    print(f"converting {qa_file} to entailment dataset...")
-    nrow = sum(1 for _ in open(qa_file, "r"))
-    with open(output_file, "w") as output_handle, open(qa_file, "r") as qa_handle:
-        # print("Writing to {} from {}".format(output_file, qa_file))
-        for line in tqdm(qa_handle, total=nrow):
-            json_line = json.loads(line)
-            output_dict = convert_qajson_to_entailment(json_line, ans_pos)
-            output_handle.write(json.dumps(output_dict))
-            output_handle.write("\n")
-    print(f"converted statements saved to {output_file}")
-    print()
-
-
-# Convert the QA file json to output dictionary containing premise and hypothesis
-def convert_qajson_to_entailment(qa_json: dict, ans_pos: bool):
+def convert_qajson_to_entailment(qa_json: Dict[str, Any], ans_pos: bool = False):
     question_text = qa_json["question"]["stem"]
     choices = qa_json["question"]["choices"]
     for choice in choices:

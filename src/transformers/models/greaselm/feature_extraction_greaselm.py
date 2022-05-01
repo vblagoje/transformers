@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Feature extractor class for GreaseLM."""
+import itertools
 import json
 import logging
 import os
@@ -34,7 +35,8 @@ from transformers import AutoTokenizer, RobertaForMaskedLM
 
 from ...feature_extraction_utils import BatchFeature, FeatureExtractionMixin, PreTrainedFeatureExtractor
 from ...utils import TensorType, logging
-from .convert_csqa import create_hypothesis, create_output_dict, get_fitb_from_question
+from ...utils.logging import tqdm
+from .convert_csqa import convert_qajson_to_entailment
 
 
 blacklist = [
@@ -141,6 +143,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         pruned_graph_path: Union[Path, str],
         score_model: Union[Path, str] = "roberta-large",
         device: str = "cuda",
+        cxt_node_connects_all: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -149,6 +152,13 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         self.pruned_graph_path = pruned_graph_path
         self.score_model = score_model
         self.device = device
+
+        self.nlp = None
+        self.matcher = None
+        self.tokenizer = None
+        self.model = None
+        self.cxt_node_connects_all = cxt_node_connects_all
+
         self.cpnet_vocab = None
         self.cpnet_vocab_underscores = None
         self.concept2id = None
@@ -194,7 +204,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
             - **pixel_values** -- Pixel values to be fed to a model.
         """
-        entailed_statement = self.convert_qajson_to_entailment(question_answer_example, False)
+        entailed_statement = convert_qajson_to_entailment(question_answer_example)
         grouned_statements = self.ground(entailed_statement)
         result = self.generate_adj_data_from_grounded_concepts__use_lm(question_answer_example, grouned_statements)
 
@@ -228,8 +238,6 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         return cls.from_dict(feature_extractor_dict, **kwargs)
 
     def start(self) -> None:
-
-        # load spacy
         self.nlp = spacy.load("en_core_web_sm", disable=["ner", "parser", "textcat"])
         self.nlp.add_pipe("sentencizer")
 
@@ -237,7 +245,6 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.score_model)
         self.model = RobertaForMaskedLMWithLoss.from_pretrained(self.score_model)
-
         self.model.to(self.device)
         self.model.eval()
 
@@ -245,14 +252,14 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             file_contents = [line.strip() for line in f]
         self.cpnet_vocab = [c.replace("_", " ") for c in file_contents]
         self.cpnet_vocab_underscores = [l for l in file_contents]
-        print("Loading pattern matcher...")
+        logger.info("Loading pattern matcher...")
         with open(self.pattern_path, "r", encoding="utf8") as fin:
             all_patterns = json.load(fin)
 
         for concept, pattern in all_patterns.items():
             self.matcher.add(concept, [pattern])
 
-        print("Loading pruned graph, please wait...")
+        logger.info("Loading pruned graph, please wait...")
         with open(self.cpnet_vocab_path, "r", encoding="utf8") as fin:
             self.id2concept = [w.strip() for w in fin]
         self.concept2id = {w: i for i, w in enumerate(self.id2concept)}
@@ -268,21 +275,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
                 self.cpnet_simple[u][v]["weight"] += w
             else:
                 self.cpnet_simple.add_edge(u, v, weight=w)
-        print("GreaseLMFeatureExtractor started.")
-
-    def convert_qajson_to_entailment(self, qa_json: Dict[str, Any], ans_pos: bool):
-        question_text = qa_json["question"]["stem"]
-        choices = qa_json["question"]["choices"]
-        for choice in choices:
-            choice_text = choice["text"]
-            pos = None
-            if not ans_pos:
-                statement = create_hypothesis(get_fitb_from_question(question_text), choice_text, ans_pos)
-            else:
-                statement, pos = create_hypothesis(get_fitb_from_question(question_text), choice_text, ans_pos)
-            create_output_dict(qa_json, statement, choice["label"] == qa_json.get("answerKey", "A"), ans_pos, pos)
-
-        return qa_json
+        logger.info("GreaseLMFeatureExtractor started")
 
     def lemmatize(self, concept: str):
 
@@ -574,13 +567,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         qmask = arange < len(qc_ids)
         amask = (arange >= len(qc_ids)) & (arange < (len(qc_ids) + len(ac_ids)))
         adj, concepts = self.concepts2adj(schema_graph)
-        return {
-            "adj": [i.tolist() for i in adj.nonzero()],
-            "concepts": concepts.tolist(),
-            "qmask": qmask.tolist(),
-            "amask": amask.tolist(),
-            "cid2score": [[i[0], float(i[1])] for i in cid2score.items()],
-        }
+        return {"adj": adj, "concepts": concepts, "qmask": qmask, "amask": amask, "cid2score": cid2score}
 
     def generate_adj_data_from_grounded_concepts__use_lm(self, statement, grounded_statements):
         """
@@ -608,3 +595,155 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             final_item = self.concepts_to_adj_matrices_2hop_all_pair__use_lm__part3(qa_item_adj_scored)
             result.append(final_item)
         return result
+
+    def load_sparse_adj_data_with_contextnode(
+        self, adj_concept_pairs, max_node_num, concepts_by_sents_list, num_choices
+    ) -> Dict[str, Any]:
+        """Construct input tensors for the GNN component of the model."""
+        # Set special nodes and links
+        context_node = 0
+        n_special_nodes = 1
+        cxt2qlinked_rel = 0
+        cxt2alinked_rel = 1
+        half_n_rel = len(self.id2relation) + 2
+        if self.cxt_node_connects_all:
+            cxt2other_rel = half_n_rel
+            half_n_rel += 1
+
+        n_samples = len(adj_concept_pairs)  # this is actually n_questions x n_choices
+        edge_index, edge_type = [], []
+        adj_lengths = torch.zeros((n_samples,), dtype=torch.long)
+        concept_ids = torch.full((n_samples, max_node_num), 1, dtype=torch.long)
+        node_type_ids = torch.full((n_samples, max_node_num), 2, dtype=torch.long)  # default 2: "other node"
+        node_scores = torch.zeros((n_samples, max_node_num, 1), dtype=torch.float)
+        special_nodes_mask = torch.zeros(n_samples, max_node_num, dtype=torch.bool)
+
+        adj_lengths_ori = adj_lengths.clone()
+        if not concepts_by_sents_list:
+            concepts_by_sents_list = itertools.repeat(None)
+        for idx, (_data, cpts_by_sents) in tqdm(
+            enumerate(zip(adj_concept_pairs, concepts_by_sents_list)), total=n_samples, desc="loading adj matrices"
+        ):
+            adj, concepts, qm, am, cid2score = (
+                _data["adj"],
+                _data["concepts"],
+                _data["qmask"],
+                _data["amask"],
+                _data["cid2score"],
+            )
+
+            assert n_special_nodes <= max_node_num
+            special_nodes_mask[idx, :n_special_nodes] = 1
+            num_concept = min(
+                len(concepts) + n_special_nodes, max_node_num
+            )  # this is the final number of nodes including contextnode but excluding PAD
+            adj_lengths_ori[idx] = len(concepts)
+            adj_lengths[idx] = num_concept
+
+            # Prepare nodes
+            concepts = concepts[: num_concept - n_special_nodes]
+            concept_ids[idx, n_special_nodes:num_concept] = torch.tensor(
+                concepts + 1
+            )  # To accomodate contextnode, original concept_ids incremented by 1
+            concept_ids[idx, 0] = context_node  # this is the "concept_id" for contextnode
+
+            # Prepare node scores
+            if cid2score is not None:
+                if -1 not in cid2score:
+                    cid2score[-1] = 0
+                for _j_ in range(num_concept):
+                    _cid = int(concept_ids[idx, _j_]) - 1  # Now context node is -1
+                    node_scores[idx, _j_, 0] = torch.tensor(cid2score[_cid])
+
+            # Prepare node types
+            node_type_ids[idx, 0] = 3  # context node
+            node_type_ids[idx, 1:n_special_nodes] = 4  # sent nodes
+            node_type_ids[idx, n_special_nodes:num_concept][
+                torch.tensor(qm, dtype=torch.bool)[: num_concept - n_special_nodes]
+            ] = 0
+            node_type_ids[idx, n_special_nodes:num_concept][
+                torch.tensor(am, dtype=torch.bool)[: num_concept - n_special_nodes]
+            ] = 1
+
+            # Load adj
+            ij = torch.tensor(adj.row, dtype=torch.int64)  # (num_matrix_entries, ), where each entry is coordinate
+            k = torch.tensor(adj.col, dtype=torch.int64)  # (num_matrix_entries, ), where each entry is coordinate
+            n_node = adj.shape[1]
+            assert len(self.id2relation) == adj.shape[0] // n_node
+            i, j = ij // n_node, ij % n_node
+
+            # Prepare edges
+            i += 2
+            j += 1
+            k += 1  # **** increment coordinate by 1, rel_id by 2 ****
+            extra_i, extra_j, extra_k = [], [], []
+            for _coord, q_tf in enumerate(qm):
+                _new_coord = _coord + n_special_nodes
+                if _new_coord > num_concept:
+                    break
+                if q_tf:
+                    extra_i.append(cxt2qlinked_rel)  # rel from contextnode to question concept
+                    extra_j.append(0)  # contextnode coordinate
+                    extra_k.append(_new_coord)  # question concept coordinate
+                elif self.cxt_node_connects_all:
+                    extra_i.append(cxt2other_rel)  # rel from contextnode to other concept
+                    extra_j.append(0)  # contextnode coordinate
+                    extra_k.append(_new_coord)  # other concept coordinate
+            for _coord, a_tf in enumerate(am):
+                _new_coord = _coord + n_special_nodes
+                if _new_coord > num_concept:
+                    break
+                if a_tf:
+                    extra_i.append(cxt2alinked_rel)  # rel from contextnode to answer concept
+                    extra_j.append(0)  # contextnode coordinate
+                    extra_k.append(_new_coord)  # answer concept coordinate
+                elif self.cxt_node_connects_all:
+                    extra_i.append(cxt2other_rel)  # rel from contextnode to other concept
+                    extra_j.append(0)  # contextnode coordinate
+                    extra_k.append(_new_coord)  # other concept coordinate
+
+            # half_n_rel += 2 #should be 19 now
+            if len(extra_i) > 0:
+                i = torch.cat([i, torch.tensor(extra_i)], dim=0)
+                j = torch.cat([j, torch.tensor(extra_j)], dim=0)
+                k = torch.cat([k, torch.tensor(extra_k)], dim=0)
+            ########################
+
+            mask = (j < max_node_num) & (k < max_node_num)
+            i, j, k = i[mask], j[mask], k[mask]
+            i, j, k = (
+                torch.cat((i, i + half_n_rel), 0),
+                torch.cat((j, k), 0),
+                torch.cat((k, j), 0),
+            )  # add inverse relations
+            edge_index.append(torch.stack([j, k], dim=0))  # each entry is [2, E]
+            edge_type.append(i)  # each entry is [E, ]
+
+        # list of size (n_questions, n_choices), where each entry is tensor[2, E]
+        edge_index = list(map(list, zip(*(iter(edge_index),) * num_choices)))
+        # list of size (n_questions, n_choices), where each entry is tensor[E, ]
+        edge_type = list(map(list, zip(*(iter(edge_type),) * num_choices)))
+
+        concept_ids, node_type_ids, node_scores, adj_lengths, special_nodes_mask = [
+            x.view(-1, num_choices, *x.size()[1:])
+            for x in (concept_ids, node_type_ids, node_scores, adj_lengths, special_nodes_mask)
+        ]
+
+        # concept_ids: (n_questions, num_choice, max_node_num)
+        # node_type_ids: (n_questions, num_choice, max_node_num)
+        # node_scores: (n_questions, num_choice, max_node_num, 1)
+        # adj_lengths: (n_questions,　num_choice)
+        # special_nodes_mask: (n_questions, num_choice, max_node_num)
+
+        # edge_index: list of size (n_questions, n_choices), where each entry is tensor[2, E]
+        # edge_type: list of size (n_questions, n_choices), where each entry is tensor[E, ]
+        # We can't stack edge_index and edge_type lists of tensors as tensors are not of equal size
+        return dict(
+            concept_ids=concept_ids,
+            node_type_ids=node_type_ids,
+            node_scores=node_scores,
+            adj_lengths=adj_lengths,
+            special_nodes_mask=special_nodes_mask,
+            edge_index=edge_index,
+            edge_type=edge_type,
+        )
