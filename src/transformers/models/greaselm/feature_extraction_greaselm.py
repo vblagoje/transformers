@@ -206,7 +206,9 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             - **pixel_values** -- Pixel values to be fed to a model.
         """
         results = []
-        for question_answer_example, entailed_statement in zip(question_answer_example, entailed_question_answer_example):
+        for question_answer_example, entailed_statement in zip(
+            question_answer_example, entailed_question_answer_example
+        ):
             grouned_statements = self.ground(entailed_statement)
             result = self.generate_adj_data_from_grounded_concepts__use_lm(question_answer_example, grouned_statements)
             results.extend(result)
@@ -253,21 +255,20 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             file_contents = [line.strip() for line in f]
         self.cpnet_vocab = [c.replace("_", " ") for c in file_contents]
         self.cpnet_vocab_underscores = [l for l in file_contents]
-        logger.info("Loading pattern matcher...")
         with open(self.pattern_path, "r", encoding="utf8") as fin:
             all_patterns = json.load(fin)
 
+        pb = tqdm(total=len(all_patterns), desc="Starting GreaseLMFeatureExtractor")
         for concept, pattern in all_patterns.items():
             self.matcher.add(concept, [pattern])
+            pb.update(1)
 
-        logger.info("Loading pruned graph, please wait...")
         with open(self.cpnet_vocab_path, "r", encoding="utf8") as fin:
             self.id2concept = [w.strip() for w in fin]
         self.concept2id = {w: i for i, w in enumerate(self.id2concept)}
 
         self.id2relation = merged_relations
         self.relation2id = {r: i for i, r in enumerate(self.id2relation)}
-
         self.cpnet = nx.read_gpickle(self.pruned_graph_path)
         self.cpnet_simple = nx.Graph()
         for u, v, data in self.cpnet.edges(data=True):
@@ -597,8 +598,9 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             result.append(final_item)
         return result
 
-    def load_sparse_adj_data_with_contextnode(self, adj_concept_pairs, num_choices,
-                                              concepts_by_sents_list) -> Dict[str, Any]:
+    def load_sparse_adj_data_with_contextnode(
+        self, adj_concept_pairs, num_choices, concepts_by_sents_list
+    ) -> Dict[str, Any]:
         """Construct input tensors for the GNN component of the model."""
         # Set special nodes and links
         context_node = 0
