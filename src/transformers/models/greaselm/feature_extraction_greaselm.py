@@ -35,8 +35,7 @@ from transformers import AutoTokenizer, RobertaForMaskedLM
 
 from ...feature_extraction_utils import BatchFeature, FeatureExtractionMixin, PreTrainedFeatureExtractor
 from ...utils import TensorType, logging
-from ...utils.logging import tqdm
-from .convert_csqa import convert_qajson_to_entailment
+from ...utils.logging import get_verbosity, tqdm
 
 
 blacklist = [
@@ -599,7 +598,11 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         return result
 
     def load_sparse_adj_data_with_contextnode(
-        self, adj_concept_pairs, num_choices, concepts_by_sents_list
+        self,
+        adj_concept_pairs,
+        num_choices,
+        concepts_by_sents_list=None,
+        disable_tqdm=bool(get_verbosity() >= logging.WARNING),
     ) -> Dict[str, Any]:
         """Construct input tensors for the GNN component of the model."""
         # Set special nodes and links
@@ -624,7 +627,10 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         if not concepts_by_sents_list:
             concepts_by_sents_list = itertools.repeat(None)
         for idx, (_data, cpts_by_sents) in tqdm(
-            enumerate(zip(adj_concept_pairs, concepts_by_sents_list)), total=n_samples, desc="loading adj matrices"
+            enumerate(zip(adj_concept_pairs, concepts_by_sents_list)),
+            total=n_samples,
+            desc="loading adj matrices",
+            disable=disable_tqdm,
         ):
             adj, concepts, qm, am, cid2score = (
                 _data["adj"],
@@ -672,7 +678,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             k = torch.tensor(adj.col, dtype=torch.int64)  # (num_matrix_entries, ), where each entry is coordinate
             n_node = adj.shape[1]
             assert len(self.id2relation) == adj.shape[0] // n_node
-            i, j = ij // n_node, ij % n_node
+            i, j = torch.div(ij, n_node, rounding_mode="floor"), ij % n_node
 
             # Prepare edges
             i += 2

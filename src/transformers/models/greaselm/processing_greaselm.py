@@ -23,7 +23,7 @@ import torch
 from ...processing_utils import ProcessorMixin
 from ...tokenization_utils_base import BatchEncoding
 from ...utils.logging import tqdm
-from .convert_csqa import convert_qajson_to_entailment
+from .convert_csqa import convert_commonsenseqa_to_entailment, convert_openbookqa_to_entailment
 
 
 class GreaseLMProcessor(ProcessorMixin):
@@ -48,6 +48,10 @@ class GreaseLMProcessor(ProcessorMixin):
         self.current_processor = self.feature_extractor
         self.max_seq_length = max_seq_length
         self.current_processor.start()
+        self.converters = {
+            "commonsenseqa": convert_commonsenseqa_to_entailment,
+            "openbookqa": convert_openbookqa_to_entailment,
+        }
 
     def __call__(self, question_answer_example: List[Dict[str, Any]], return_tensors=None, **kwargs):
         r"""
@@ -59,8 +63,20 @@ class GreaseLMProcessor(ProcessorMixin):
               `return_attention_mask=True` or if *"attention_mask"* is in `self.model_input_names` and if `text` is not
               `None`).
         """
+        converter = kwargs.get("question_answer_converter", None)
+        if converter is None:
+            # try known formats, i.e. commonsenseqa and openbookqa
+            format_type = self.detect_type(question_answer_example[0])
+            if format_type:
+                converter = self.converters[format_type]
+            else:
+                raise ValueError(
+                    f"Could not detect the dataset type of the input example. "
+                    f"Currently supported datasets are {self.converters.keys()}. "
+                    f"For new dataset examples use `question_answer_converter` argument."
+                )
 
-        entailed_qa = [convert_qajson_to_entailment(e) for e in question_answer_example]
+        entailed_qa = [converter(e) for e in question_answer_example]
         qids, num_choices, lm_encoding = self.encode_question_answer_example(entailed_qa)
         assert num_choices > 0
         assert len(qids) == len(question_answer_example)
@@ -68,9 +84,19 @@ class GreaseLMProcessor(ProcessorMixin):
         # Load adj data
         features = self.current_processor(question_answer_example, entailed_qa)
 
-        kg_encoding = self.current_processor.load_sparse_adj_data_with_contextnode(features, num_choices, None)
+        kg_encoding = self.current_processor.load_sparse_adj_data_with_contextnode(features, num_choices)
 
         return KGEncoding(data={**lm_encoding, **kg_encoding})
+
+    @staticmethod
+    def detect_type(question_answer_example: Dict[str, Any]):
+        if "question" in question_answer_example and "question_concept" in question_answer_example["question"]:
+            return "commonsenseqa"
+        elif "question" in question_answer_example and "stem" in question_answer_example["question"]:
+            # most likely openbookqa
+            return "openbookqa"
+        else:
+            return None
 
     def encode_question_answer_example(self, entailed_qa_examples: List[Dict[str, Any]]):
         class InputExample(object):

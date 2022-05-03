@@ -24,21 +24,27 @@ JSONL format of files
         likely to be at dark place"} ]
   }
 """
-
-import json
 import re
 from typing import Any, Dict
 
-from tqdm import tqdm
 
-
-__all__ = ["convert_qajson_to_entailment"]
+__all__ = ["convert_commonsenseqa_to_entailment", "convert_openbookqa_to_entailment"]
 
 # String used to indicate a blank
 BLANK_STR = "___"
 
 
-def convert_qajson_to_entailment(qa_json: Dict[str, Any], ans_pos: bool = False):
+def convert_openbookqa_to_entailment(qa_json: Dict[str, Any]):
+    for choice in qa_json["question"]["choices"]:
+        statement = " ".join([qa_json["question"]["stem"], choice["text"]])
+        if "statements" not in qa_json:
+            qa_json["statements"] = []
+        label = choice["label"] == qa_json.get("answerKey", "A")
+        qa_json["statements"].append({"label": label, "statement": statement})
+    return qa_json
+
+
+def convert_commonsenseqa_to_entailment(qa_json: Dict[str, Any], ans_pos: bool = False):
     question_text = qa_json["question"]["stem"]
     choices = qa_json["question"]["choices"]
     for choice in choices:
