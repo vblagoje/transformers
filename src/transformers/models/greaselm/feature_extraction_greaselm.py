@@ -25,13 +25,14 @@ from typing import Any, Dict, List, Optional, Union
 import nltk
 import numpy as np
 import torch
+from torch.nn import CrossEntropyLoss
 
 import networkx as nx
 import spacy
 from huggingface_hub import hf_hub_download
 from scipy.sparse import coo_matrix
 from spacy.matcher import Matcher
-from transformers import AutoTokenizer, RobertaForMaskedLM
+from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from ...feature_extraction_utils import BatchFeature, FeatureExtractionMixin, PreTrainedFeatureExtractor
 from ...utils import TensorType, logging
@@ -86,42 +87,6 @@ nltk_stopwords = nltk.corpus.stopwords.words("english")
 logger = logging.get_logger(__name__)
 
 
-class RobertaForMaskedLMWithLoss(RobertaForMaskedLM):
-    def __init__(self, config):
-        super().__init__(config)
-
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        masked_lm_labels=None,
-    ):
-        assert attention_mask is not None
-        outputs = self.roberta(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-        )
-        sequence_output = outputs[0]  # hidden_states of final layer (batch_size, sequence_length, hidden_size)
-        prediction_scores = self.lm_head(sequence_output)
-        outputs = (prediction_scores, sequence_output) + outputs[2:]
-        if masked_lm_labels is not None:
-            loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
-            bsize, seqlen = input_ids.size()
-            masked_lm_loss = loss_fct(
-                prediction_scores.view(-1, self.config.vocab_size), masked_lm_labels.view(-1)
-            ).view(bsize, seqlen)
-            masked_lm_loss = (masked_lm_loss * attention_mask).sum(dim=1)
-            outputs = (masked_lm_loss,) + outputs
-            # (masked_lm_loss), prediction_scores, sequence_output, (hidden_states), (attentions)
-        return outputs
-
-
 class GreaseLMFeatureExtractor(FeatureExtractionMixin):
     r"""
     Constructs a GreaseLM feature extractor.
@@ -156,6 +121,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         self.matcher = None
         self.tokenizer = None
         self.model = None
+        self.loss_fct = None
         self.cxt_node_connects_all = cxt_node_connects_all
 
         self.cpnet_vocab = None
@@ -246,9 +212,11 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         self.matcher = Matcher(vocab=self.nlp.vocab)
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.score_model)
-        self.model = RobertaForMaskedLMWithLoss.from_pretrained(self.score_model)
+        self.model = AutoModelForMaskedLM.from_pretrained(self.score_model)
         self.model.to(self.device)
         self.model.eval()
+
+        self.loss_fct = CrossEntropyLoss(reduction="none")
 
         with open(self.cpnet_vocab_path, "r", encoding="utf8") as f:
             file_contents = [line.strip() for line in f]
@@ -536,14 +504,21 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             mask = (input_ids != 1).long()  # [B, seq_len]
             # Get LM score
             with torch.no_grad():
-                outputs = self.model(input_ids, attention_mask=mask, masked_lm_labels=input_ids)
-                loss = outputs[0]  # [B, ]
-                _scores = list(-loss.detach().cpu().numpy())  # list of float
+                _scores = self.model_score(input_ids, mask)
             scores += _scores
             cur_idx += batch_size
         assert len(sents) == len(scores) == len(cids)
         cid2score = OrderedDict(sorted(list(zip(cids, scores)), key=lambda x: -x[1]))  # score: from high to low
         return cid2score
+
+    def model_score(self, input_ids, mask):
+        output = self.model(input_ids, attention_mask=mask, labels=input_ids)
+        bsize, seqlen = input_ids.size()
+        prediction = output["logits"].view(-1, self.model.config.vocab_size)
+        ground_truth = input_ids.view(-1)
+        lm_loss = self.loss_fct(prediction, ground_truth).view(bsize, seqlen)
+        scores = (lm_loss * mask).sum(dim=1)
+        return list(-scores.detach().cpu().numpy())
 
     def concepts_to_adj_matrices_2hop_all_pair__use_lm__part1(self, data):
         qc_ids, ac_ids, question = data
