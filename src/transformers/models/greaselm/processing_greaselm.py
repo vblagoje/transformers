@@ -45,13 +45,12 @@ class GreaseLMProcessor(ProcessorMixin):
 
     def __init__(self, feature_extractor, tokenizer, max_seq_length=128):
         super().__init__(feature_extractor, tokenizer)
-        self.current_processor = self.feature_extractor
         self.max_seq_length = max_seq_length
-        self.current_processor.start()
         self.converters = {
             "commonsenseqa": convert_commonsenseqa_to_entailment,
             "openbookqa": convert_openbookqa_to_entailment,
         }
+        feature_extractor.start()
 
     def __call__(self, question_answer_example: List[Dict[str, Any]], return_tensors=None, **kwargs):
         r"""
@@ -75,18 +74,17 @@ class GreaseLMProcessor(ProcessorMixin):
                     f"Currently supported datasets are {self.converters.keys()}. "
                     f"For new dataset examples use `question_answer_converter` argument."
                 )
-
+        # Step 1: convert QA examples to a list of entailed examples
         entailed_qa = [converter(e) for e in question_answer_example]
+
+        # Step 2: encode entailed QA examples into a batch of LM encodings
         qids, num_choices, lm_encoding = self.encode_question_answer_example(entailed_qa)
-        assert num_choices > 0
-        assert len(qids) == len(question_answer_example)
 
-        # Load adj data
-        features = self.current_processor(question_answer_example, entailed_qa)
+        # Step 3: encode entailed QA examples into a batch of graph encodings
+        kg_encoding = self.feature_extractor(question_answer_example, entailed_qa, num_choices)
 
-        kg_encoding = self.current_processor.load_sparse_adj_data_with_contextnode(features, num_choices)
-
-        return KGEncoding(data={**lm_encoding, **kg_encoding})
+        # Step 4: combine the two encodings ready for model input
+        return LMKGEncoding(data={**lm_encoding, **kg_encoding})
 
     @staticmethod
     def detect_type(question_answer_example: Dict[str, Any]):
@@ -187,7 +185,9 @@ class GreaseLMProcessor(ProcessorMixin):
         return self.tokenizer.decode(*args, **kwargs)
 
 
-class KGEncoding(UserDict):
+# It would be great to use BatchEncoding here.
+# However, BatchEncoding doesn't support moving unequal length lists of tensors to device
+class LMKGEncoding(UserDict):
     def __init__(self, data: Optional[Dict[str, Any]] = None):
         super().__init__(data)
 
@@ -200,7 +200,15 @@ class KGEncoding(UserDict):
     def items(self):
         return self.data.items()
 
-    def _to_device(self, obj, device):
+    def _to_device(self, obj: Any, device):
+        """
+        Recursively peels of lists and tuples to tensors and moves them to the given device.
+        Note: we can't stack KG lists of tensors as they are of different sizes.
+
+        :param obj: The object to be moved to the device
+        :param device: The device to put the model on
+        :return: A list of the items in the tuple or list that have been moved to the device.
+        """
         if isinstance(obj, (tuple, list)):
             return [self._to_device(item, device) for item in obj]
         else:
@@ -212,7 +220,7 @@ class KGEncoding(UserDict):
         Send all values to device by calling `v.to(device)` (PyTorch only).
             device (`str` or `torch.device`): The device to put the tensors on.
         Returns:
-            [`KGEncoding`]: The same instance after modification.
+            [`LMKGEncoding`]: The same instance after modification.
         """
 
         # This check catches things like APEX blindly calling "to" on all inputs to a module

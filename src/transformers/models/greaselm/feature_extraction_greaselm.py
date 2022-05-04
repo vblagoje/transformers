@@ -155,9 +155,10 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         self,
         question_answer_example: List[Dict[str, Any]],
         entailed_question_answer_example: List[Dict[str, Any]],
+        num_choices: int = 5,
         return_tensors: Optional[Union[str, TensorType]] = None,
         **kwargs
-    ) -> BatchFeature:
+    ) -> Dict[str, Any]:
         """
         Main method to prepare for the model one or several image(s).
 
@@ -187,14 +188,15 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
             - **pixel_values** -- Pixel values to be fed to a model.
         """
-        results = []
+        batch_features = []
         for question_answer_example, entailed_statement in zip(
             question_answer_example, entailed_question_answer_example
         ):
             grouned_statements = self.ground(entailed_statement)
-            result = self.generate_adj_data_from_grounded_concepts__use_lm(question_answer_example, grouned_statements)
-            results.extend(result)
-        return results
+            example_features = self.generate_adj_data_from_grounded_concepts__use_lm(question_answer_example,
+                                                                                     grouned_statements)
+            batch_features.extend(example_features)
+        return self.load_sparse_adj_data_with_contextnode(batch_features, num_choices)
 
     @classmethod
     def from_pretrained(
@@ -562,7 +564,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         adj, concepts = self.concepts2adj(schema_graph)
         return {"adj": adj, "concepts": concepts, "qmask": qmask, "amask": amask, "cid2score": cid2score}
 
-    def generate_adj_data_from_grounded_concepts__use_lm(self, statement, grounded_statements):
+    def generate_adj_data_from_grounded_concepts__use_lm(self, statement, grounded_statements) -> List[Dict[str, Any]]:
         """
         This function will save
             (1) adjacency matrics (each in the form of a (R*N, N) coo sparse matrix) (2) concepts ids (3) qmask that
@@ -581,13 +583,13 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             qa_context = "{} {}.".format(statement["question"]["stem"], grounded_statement["ans"])
             qa_data.append((q_ids, a_ids, qa_context))
 
-        result = []
+        choice_features = []
         for qa_item in qa_data:
             qa_item_adj = self.concepts_to_adj_matrices_2hop_all_pair__use_lm__part1(qa_item)
             qa_item_adj_scored = self.concepts_to_adj_matrices_2hop_all_pair__use_lm__part2(qa_item_adj)
-            final_item = self.concepts_to_adj_matrices_2hop_all_pair__use_lm__part3(qa_item_adj_scored)
-            result.append(final_item)
-        return result
+            graph_features = self.concepts_to_adj_matrices_2hop_all_pair__use_lm__part3(qa_item_adj_scored)
+            choice_features.append(graph_features)
+        return choice_features
 
     def load_sparse_adj_data_with_contextnode(
         self,
