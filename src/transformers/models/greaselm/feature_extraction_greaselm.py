@@ -28,9 +28,8 @@ from torch.nn import CrossEntropyLoss
 
 import networkx as nx
 import spacy
-from huggingface_hub import hf_hub_download
-from scipy.sparse import coo_matrix
 from spacy.matcher import Matcher
+from huggingface_hub import hf_hub_download
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from ...feature_extraction_utils import BatchFeature, FeatureExtractionMixin, PreTrainedFeatureExtractor
@@ -494,7 +493,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
                         if 0 <= e_attr["rel"] < n_rel:
                             adj[e_attr["rel"]][s][t] = 1
         # cids += 1  # note!!! index 0 is reserved for padding
-        adj = coo_matrix(adj.reshape(-1, n_node))
+        adj = adj.reshape(-1, n_node)
         return adj, cids
 
     def get_lm_score(self, cids, question):
@@ -667,8 +666,9 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             ] = 1
 
             # Load adj
-            ij = torch.tensor(adj.row, dtype=torch.int64)  # (num_matrix_entries, ), where each entry is coordinate
-            k = torch.tensor(adj.col, dtype=torch.int64)  # (num_matrix_entries, ), where each entry is coordinate
+            elements = np.nonzero(adj)  # elements are (row, col)
+            ij = torch.tensor(elements[0], dtype=torch.int64)  # (num_matrix_entries, ), where each entry is coordinate
+            k = torch.tensor(elements[1], dtype=torch.int64)  # (num_matrix_entries, ), where each entry is coordinate
             n_node = adj.shape[1]
             assert len(self.id2relation) == adj.shape[0] // n_node
             i, j = torch.div(ij, n_node, rounding_mode="floor"), ij % n_node
