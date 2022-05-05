@@ -49,12 +49,13 @@ from .configuration_greaselm import GreaseLMConfig
 
 logger = logging.get_logger(__name__)
 
-_CHECKPOINT_FOR_DOC = "vblagoje/greaselm"
+_CHECKPOINT_FOR_DOC = "vblagoje/greaselm-csqa"
 _CONFIG_FOR_DOC = "GreaseLMConfig"
 _TOKENIZER_FOR_DOC = "RobertaTokenizer"
 
 GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "vblagoje/greaselm",
+    "vblagoje/greaselm-csqa",
+    "vblagoje/greaselm-obqa",
     # See all greaselm models at https://huggingface.co/models?filter=greaselm
 ]
 
