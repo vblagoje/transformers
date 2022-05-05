@@ -17,9 +17,9 @@
 from collections import OrderedDict
 from typing import Mapping
 
+from ... import PretrainedConfig
 from ...onnx import OnnxConfig
 from ...utils import logging
-from ..bert.configuration_bert import BertConfig
 
 
 logger = logging.get_logger(__name__)
@@ -29,7 +29,7 @@ GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP = {
 }
 
 
-class GreaseLMConfig(BertConfig):
+class GreaseLMConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`GreaseLMModel`] or a [`TFGreaseLMModel`]. It is
     used to instantiate a greaselm model according to the specified arguments, defining the model architecture.
@@ -43,16 +43,54 @@ class GreaseLMConfig(BertConfig):
     class for more information.
 
     Args:
+         vocab_size (`int`, *optional*, defaults to 30522):
+            Vocabulary size of the BERT model. Defines the number of different tokens that can be represented by the
+            `inputs_ids` passed when calling [`BertModel`] or [`TFBertModel`].
+        hidden_size (`int`, *optional*, defaults to 768):
+            Dimensionality of the encoder layers and the pooler layer.
+        num_hidden_layers (`int`, *optional*, defaults to 12):
+            Number of hidden layers in the Transformer encoder.
+        num_attention_heads (`int`, *optional*, defaults to 12):
+            Number of attention heads for each attention layer in the Transformer encoder.
+        intermediate_size (`int`, *optional*, defaults to 3072):
+            Dimensionality of the "intermediate" (often named feed-forward) layer in the Transformer encoder.
+        hidden_act (`str` or `Callable`, *optional*, defaults to `"gelu"`):
+            The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
+            `"relu"`, `"silu"` and `"gelu_new"` are supported.
+        hidden_dropout_prob (`float`, *optional*, defaults to 0.1):
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
+        attention_probs_dropout_prob (`float`, *optional*, defaults to 0.1):
+            The dropout ratio for the attention probabilities.
+        max_position_embeddings (`int`, *optional*, defaults to 512):
+            The maximum sequence length that this model might ever be used with. Typically set this to something large
+            just in case (e.g., 512 or 1024 or 2048).
+        type_vocab_size (`int`, *optional*, defaults to 2):
+            The vocabulary size of the `token_type_ids` passed when calling [`BertModel`] or [`TFBertModel`].
+        initializer_range (`float`, *optional*, defaults to 0.02):
+            The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
+        layer_norm_eps (`float`, *optional*, defaults to 1e-12):
+            The epsilon used by the layer normalization layers.
+        position_embedding_type (`str`, *optional*, defaults to `"absolute"`):
+            Type of position embedding. Choose one of `"absolute"`, `"relative_key"`, `"relative_key_query"`. For
+            positional embeddings use `"absolute"`. For more information on `"relative_key"`, please refer to
+            [Self-Attention with Relative Position Representations (Shaw et al.)](https://arxiv.org/abs/1803.02155).
+            For more information on `"relative_key_query"`, please refer to *Method 4* in [Improve Transformer Models
+            with Better Relative Position Embeddings (Huang et al.)](https://arxiv.org/abs/2009.13658).
+        use_cache (`bool`, *optional*, defaults to `True`):
+            Whether or not the model should return the last key/values attentions (not used by all models). Only
+            relevant if `config.is_decoder=True`.
+        classifier_dropout (`float`, *optional*):
+            The dropout ratio for the classification head.
         num_gnn_layers (`int`, *optional*, defaults to 5):
-            Number of GNN layers
+            Number of GNN layers.
         num_node_types (`int`, *optional*, defaults to 4):
-            Number of node types in the graph
+            Number of node types in the graph.
         num_edge_types (`int`, *optional*, defaults to 38):
-            Number of edge types in the graph
+            Number of edge types in the graph.
         concept_dim (`int`, *optional*, defaults to 200):
-            Dimension of the concept embeddings
+            Dimension of the concept embeddings.
         gnn_hidden_size (`int`, *optional*, defaults to 200):
-            Hidden size of the GNN
+            Hidden size of the GNN.
 
     Examples:
 
@@ -71,16 +109,59 @@ class GreaseLMConfig(BertConfig):
     model_type = "greaselm"
 
     def __init__(
-        self, num_gnn_layers=5, num_node_types=4, num_edge_types=38, concept_dim=200, gnn_hidden_size=200, **kwargs
+        self,
+        vocab_size=30522,
+        hidden_size=768,
+        num_hidden_layers=12,
+        num_attention_heads=12,
+        intermediate_size=3072,
+        hidden_act="gelu",
+        hidden_dropout_prob=0.1,
+        attention_probs_dropout_prob=0.1,
+        max_position_embeddings=512,
+        type_vocab_size=2,
+        initializer_range=0.02,
+        layer_norm_eps=1e-12,
+        pad_token_id=0,
+        position_embedding_type="absolute",
+        use_cache=True,
+        classifier_dropout=None,
+        num_gnn_layers=5,
+        num_node_types=4,
+        num_edge_types=38,
+        concept_dim=200,
+        gnn_hidden_size=200,
+        **kwargs
     ):
         """Constructs GreaseLMConfig."""
-        super().__init__(**kwargs)
-        default_dropout = 0.2
+        super().__init__(pad_token_id=pad_token_id, **kwargs)
+        # LM parameters
+        self.vocab_size = vocab_size
+        self.hidden_size = hidden_size
+        self.num_hidden_layers = num_hidden_layers
+        self.num_attention_heads = num_attention_heads
+        self.hidden_act = hidden_act
+        self.intermediate_size = intermediate_size
+        self.hidden_dropout_prob = hidden_dropout_prob
+        self.attention_probs_dropout_prob = attention_probs_dropout_prob
+        self.max_position_embeddings = max_position_embeddings
+        self.type_vocab_size = type_vocab_size
+        self.initializer_range = initializer_range
+        self.layer_norm_eps = layer_norm_eps
+        self.position_embedding_type = position_embedding_type
+        self.use_cache = use_cache
+        self.classifier_dropout = classifier_dropout
+
+        # GNN parameters
         self.num_gnn_layers = num_gnn_layers
         self.num_node_types = num_node_types
         self.num_edge_types = num_edge_types
         self.concept_dim = concept_dim
         self.gnn_hidden_size = gnn_hidden_size
+
+        # These GNN layer configs rarely change, but they are parameters in
+        # the original config file. Keep them here for now.
+        default_dropout = 0.2
         self.num_lm_gnn_attention_heads = kwargs.pop("num_lm_gnn_attention_heads", 2)
         self.fc_dim = kwargs.pop("fc_dim", 200)
         self.n_fc_layer = kwargs.pop("n_fc_layer", 0)
@@ -105,5 +186,6 @@ class GreaseLMOnnxConfig(OnnxConfig):
             [
                 ("input_ids", dynamic_axis),
                 ("attention_mask", dynamic_axis),
+                ("token_type_ids", dynamic_axis),
             ]
         )
