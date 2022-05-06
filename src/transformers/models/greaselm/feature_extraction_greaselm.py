@@ -119,9 +119,9 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
     def __init__(
         self,
-        cpnet_vocab_path: Union[Path, str],
-        pattern_path: Union[Path, str],
-        pruned_graph_path: Union[Path, str],
+        cpnet_vocab_path: Union[Path, str] = "concept.txt",
+        pattern_path: Union[Path, str] = "matcher_patterns.json",
+        pruned_graph_path: Union[Path, str] = "conceptnet.en.pruned.graph",
         score_model: Union[Path, str] = "roberta-large",
         device: str = "cuda",
         cxt_node_connects_all: bool = False,
@@ -150,6 +150,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
         self.cpnet_simple = None
         self.cpnet = None
+        self.started = False
 
     def __call__(
         self,
@@ -207,17 +208,11 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         feature_extractor_dict, kwargs = cls.get_feature_extractor_dict(pretrained_model_name_or_path, **kwargs)
 
         # download files needed for preprocessor
-        cpnet_vocab_path = hf_hub_download(
-            repo_id=pretrained_model_name_or_path, filename=feature_extractor_dict["cpnet_vocab_path"], **kwargs
-        )
-        pattern_path = hf_hub_download(
-            repo_id=pretrained_model_name_or_path, filename=feature_extractor_dict["pattern_path"], **kwargs
-        )
-        pruned_graph_path = hf_hub_download(
-            repo_id=pretrained_model_name_or_path, filename=feature_extractor_dict["pruned_graph_path"], **kwargs
-        )
+        cpnet_vocab_path = hf_hub_download(pretrained_model_name_or_path, feature_extractor_dict["cpnet_vocab_path"])
+        pattern_path = hf_hub_download(pretrained_model_name_or_path, feature_extractor_dict["pattern_path"])
+        pruned_graph_path = hf_hub_download(pretrained_model_name_or_path, feature_extractor_dict["pruned_graph_path"])
 
-        # set local files as parameters for preprocessor init method
+        # set resolved local files as parameters for preprocessor init method
         feature_extractor_dict["cpnet_vocab_path"] = cpnet_vocab_path
         feature_extractor_dict["pattern_path"] = pattern_path
         feature_extractor_dict["pruned_graph_path"] = pruned_graph_path
@@ -225,45 +220,48 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         return cls.from_dict(feature_extractor_dict, **kwargs)
 
     def start(self) -> None:
-        self.nlp = spacy.load("en_core_web_sm", disable=["ner", "parser", "textcat"])
-        self.nlp.add_pipe("sentencizer")
+        if not self.started:
+            self.nlp = spacy.load("en_core_web_sm", disable=["ner", "parser", "textcat"])
+            self.nlp.add_pipe("sentencizer")
 
-        self.matcher = Matcher(vocab=self.nlp.vocab)
+            self.matcher = Matcher(vocab=self.nlp.vocab)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(self.score_model)
-        self.model = AutoModelForMaskedLM.from_pretrained(self.score_model)
-        self.model.to(self.device)
-        self.model.eval()
+            self.tokenizer = AutoTokenizer.from_pretrained(self.score_model)
+            self.model = AutoModelForMaskedLM.from_pretrained(self.score_model)
+            self.model.to(self.device)
+            self.model.eval()
 
-        self.loss_fct = CrossEntropyLoss(reduction="none")
+            self.loss_fct = CrossEntropyLoss(reduction="none")
 
-        with open(self.cpnet_vocab_path, "r", encoding="utf8") as f:
-            file_contents = [line.strip() for line in f]
-        self.cpnet_vocab = [c.replace("_", " ") for c in file_contents]
-        self.cpnet_vocab_underscores = [l for l in file_contents]
-        with open(self.pattern_path, "r", encoding="utf8") as fin:
-            all_patterns = json.load(fin)
+            with open(self.cpnet_vocab_path, "r", encoding="utf8") as f:
+                file_contents = [line.strip() for line in f]
+            self.cpnet_vocab = [c.replace("_", " ") for c in file_contents]
+            self.cpnet_vocab_underscores = [l for l in file_contents]
+            with open(self.pattern_path, "r", encoding="utf8") as fin:
+                all_patterns = json.load(fin)
 
-        pb = tqdm(total=len(all_patterns), desc="Starting GreaseLMFeatureExtractor")
-        for concept, pattern in all_patterns.items():
-            self.matcher.add(concept, [pattern])
-            pb.update(1)
+            pb = tqdm(total=len(all_patterns), desc="Starting GreaseLMFeatureExtractor")
+            for concept, pattern in all_patterns.items():
+                self.matcher.add(concept, [pattern])
+                pb.update(1)
 
-        with open(self.cpnet_vocab_path, "r", encoding="utf8") as fin:
-            self.id2concept = [w.strip() for w in fin]
-        self.concept2id = {w: i for i, w in enumerate(self.id2concept)}
+            with open(self.cpnet_vocab_path, "r", encoding="utf8") as fin:
+                self.id2concept = [w.strip() for w in fin]
+            self.concept2id = {w: i for i, w in enumerate(self.id2concept)}
 
-        self.id2relation = merged_relations
-        self.relation2id = {r: i for i, r in enumerate(self.id2relation)}
-        self.cpnet = nx.read_gpickle(self.pruned_graph_path)
-        self.cpnet_simple = nx.Graph()
-        for u, v, data in self.cpnet.edges(data=True):
-            w = data["weight"] if "weight" in data else 1.0
-            if self.cpnet_simple.has_edge(u, v):
-                self.cpnet_simple[u][v]["weight"] += w
-            else:
-                self.cpnet_simple.add_edge(u, v, weight=w)
-        logger.info("GreaseLMFeatureExtractor started")
+            self.id2relation = merged_relations
+            self.relation2id = {r: i for i, r in enumerate(self.id2relation)}
+            self.cpnet = nx.read_gpickle(self.pruned_graph_path)
+            self.cpnet_simple = nx.Graph()
+            for u, v, data in self.cpnet.edges(data=True):
+                w = data["weight"] if "weight" in data else 1.0
+                if self.cpnet_simple.has_edge(u, v):
+                    self.cpnet_simple[u][v]["weight"] += w
+                else:
+                    self.cpnet_simple.add_edge(u, v, weight=w)
+            logger.info("GreaseLMFeatureExtractor started")
+        else:
+            logger.info("GreaseLMFeatureExtractor already started")
 
     def lemmatize(self, concept: str):
 
