@@ -13,10 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Feature extractor class for GreaseLM."""
+import gzip
 import itertools
 import json
 import logging
 import os
+import pickle
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -26,7 +28,6 @@ import numpy as np
 import torch
 from torch.nn import CrossEntropyLoss
 
-import networkx as nx
 import spacy
 from spacy.matcher import Matcher
 from huggingface_hub import hf_hub_download
@@ -256,14 +257,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
             self.id2relation = merged_relations
             self.relation2id = {r: i for i, r in enumerate(self.id2relation)}
-            self.cpnet = nx.read_gpickle(self.pruned_graph_path)
-            self.cpnet_simple = nx.Graph()
-            for u, v, data in self.cpnet.edges(data=True):
-                w = data["weight"] if "weight" in data else 1.0
-                if self.cpnet_simple.has_edge(u, v):
-                    self.cpnet_simple[u][v]["weight"] += w
-                else:
-                    self.cpnet_simple.add_edge(u, v, weight=w)
+            self.cpnet = pickle.load(gzip.open(self.pruned_graph_path))
             logger.info("GreaseLMFeatureExtractor started")
         else:
             logger.info("GreaseLMFeatureExtractor already started")
@@ -493,13 +487,16 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         for s in range(n_node):
             for t in range(n_node):
                 s_c, t_c = cids[s], cids[t]
-                if self.cpnet.has_edge(s_c, t_c):
+                if self.has_edge(s_c, t_c):
                     for e_attr in self.cpnet[s_c][t_c].values():
                         if 0 <= e_attr["rel"] < n_rel:
                             adj[e_attr["rel"]][s][t] = 1
         # cids += 1  # note!!! index 0 is reserved for padding
         adj = adj.reshape(-1, n_node)
         return adj, cids
+
+    def has_edge(self, u, v):
+        return u in self.cpnet and v in self.cpnet[u]
 
     def get_lm_score(self, cids, question):
         cids = cids[:]
@@ -548,8 +545,8 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         extra_nodes = set()
         for qid in qa_nodes:
             for aid in qa_nodes:
-                if qid != aid and qid in self.cpnet_simple.nodes and aid in self.cpnet_simple.nodes:
-                    extra_nodes |= set(self.cpnet_simple[qid]) & set(self.cpnet_simple[aid])
+                if qid != aid and qid in self.cpnet and aid in self.cpnet:
+                    extra_nodes |= set(self.cpnet[qid].keys()) & set(self.cpnet[aid].keys())
         extra_nodes = extra_nodes - qa_nodes
         return sorted(qc_ids), sorted(ac_ids), question, sorted(extra_nodes)
 
