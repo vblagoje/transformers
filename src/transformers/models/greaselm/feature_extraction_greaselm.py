@@ -205,19 +205,24 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
     ) -> PreTrainedFeatureExtractor:
 
         # get preprocessor_config.json
-        feature_extractor_dict, kwargs = cls.get_feature_extractor_dict(pretrained_model_name_or_path, **kwargs)
+        extractor_dict, kwargs = cls.get_feature_extractor_dict(pretrained_model_name_or_path, **kwargs)
 
         # download files needed for preprocessor
-        cpnet_vocab_path = hf_hub_download(pretrained_model_name_or_path, feature_extractor_dict["cpnet_vocab_path"])
-        pattern_path = hf_hub_download(pretrained_model_name_or_path, feature_extractor_dict["pattern_path"])
-        pruned_graph_path = hf_hub_download(pretrained_model_name_or_path, feature_extractor_dict["pruned_graph_path"])
+        if os.path.isdir(pretrained_model_name_or_path):
+            cpnet_vocab_path = os.path.join(pretrained_model_name_or_path, extractor_dict["cpnet_vocab_path"])
+            pattern_path = os.path.join(pretrained_model_name_or_path, extractor_dict["pattern_path"])
+            pruned_graph_path = os.path.join(pretrained_model_name_or_path, extractor_dict["pruned_graph_path"])
+        else:
+            cpnet_vocab_path = hf_hub_download(pretrained_model_name_or_path, extractor_dict["cpnet_vocab_path"])
+            pattern_path = hf_hub_download(pretrained_model_name_or_path, extractor_dict["pattern_path"])
+            pruned_graph_path = hf_hub_download(pretrained_model_name_or_path, extractor_dict["pruned_graph_path"])
 
         # set resolved local files as parameters for preprocessor init method
-        feature_extractor_dict["cpnet_vocab_path"] = cpnet_vocab_path
-        feature_extractor_dict["pattern_path"] = pattern_path
-        feature_extractor_dict["pruned_graph_path"] = pruned_graph_path
+        extractor_dict["cpnet_vocab_path"] = cpnet_vocab_path
+        extractor_dict["pattern_path"] = pattern_path
+        extractor_dict["pruned_graph_path"] = pruned_graph_path
 
-        return cls.from_dict(feature_extractor_dict, **kwargs)
+        return cls.from_dict(extractor_dict, **kwargs)
 
     def start(self) -> None:
         if not self.started:
