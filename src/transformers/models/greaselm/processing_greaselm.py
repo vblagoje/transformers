@@ -31,8 +31,12 @@ class GreaseLMProcessor(ProcessorMixin):
     Constructs a GreaseLM processor which wraps a GreaseLM feature extractor and a Roberta tokenizer into a single
     processor.
 
-    [`GreaseLMProcessor`] offers all the functionalities of [`GreaseLMFeatureExtractor`] and [`RobertaTokenizerFast`].
-    See the [`~GreaseLMProcessor.__call__`] and [`~GreaseLMProcessor.decode`] for more information.
+    [`GreaseLMProcessor`] offers all the functionalities you need to prepare data for the model.
+
+    It uses ['GreaseLMFeatureExtractor'] to convert CommonSenseQA or OpenBookQA question-answer example(s) into a
+    batch of graph encodings and then encodes examples into a batch of language model encodings, finally combining
+    graph and language model encodings into a model ready input.
+
 
     Args:
         feature_extractor ([`GreaseLMFeatureExtractor`]):
@@ -52,16 +56,43 @@ class GreaseLMProcessor(ProcessorMixin):
         }
         feature_extractor.start()
 
-    def __call__(self, question_answer_example: List[Dict[str, Any]], return_tensors=None, **kwargs):
-        r"""
-        Returns:
-            [`BatchEncoding`]: A [`BatchEncoding`] with the following fields:
-
-            - **input_ids** -- List of token ids to be fed to a model. Returned when `text` is not `None`.
-            - **attention_mask** -- List of indices specifying which tokens should be attended to by the model (when
-              `return_attention_mask=True` or if *"attention_mask"* is in `self.model_input_names` and if `text` is not
-              `None`).
+    def __call__(self, question_answer_example: Union[Dict[str, Any], List[Dict[str, Any]]], **kwargs):
         """
+
+        Main method that takes question-answer example(s) and encodes them into a batch of language model encodings and
+        a batch of graph encodings combining the two encodings ready for GreaseLM model input
+
+        Args:
+        question_answer_example ('Union[Dict[str, Any], List[Dict[str, Any]]]'):
+            The input question answer example. It can be a single example or a list of examples
+            See CommonSenseQA and/or OpenBookQA examples for more information
+
+        Returns:
+              [`dict`]: A [`dict`] with the following fields:
+
+              - input_ids: (batch_size, num_choices, seq_len)
+              - token_type_ids: (batch_size, num_choices, seq_len)
+              - attention_mask: (batch_size, num_choices, seq_len)
+              - special_tokens_mask: (batch_size, num_choices, seq_len)
+              - labels: (batch_size,)
+              - concept_ids: (batch_size, num_choices, max_node_num)
+              - node_type_ids: (batch_size, num_choices, max_node_num)
+              - node_scores: (batch_size, num_choices, max_node_num, 1)
+              - adj_lengths: (batch_size,　num_choices)
+              - special_nodes_mask: (batch_size, num_choices, max_node_num)
+              - edge_index: list of size (batch_size, num_choices), where each entry is tensor[2, E]
+              - edge_type: list of size (batch_size, num_choices), where each entry is tensor[E, ]
+        """
+        # Check for valid input
+        if isinstance(question_answer_example, list):
+            assert all([isinstance(e, dict) for e in question_answer_example])
+        elif isinstance(question_answer_example, dict):
+            # add batch dimension
+            question_answer_example = [question_answer_example]
+        else:
+            raise ValueError("Input parameter 'question_answer_example' must be a "
+                             f"Union[Dict[str, Any], List[Dict[str, Any]]] not {type(question_answer_example)}")
+
         converter = kwargs.get("question_answer_converter", None)
         if converter is None:
             # try known formats, i.e. commonsenseqa and openbookqa

@@ -88,8 +88,22 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
     This feature extractor inherits from [`FeatureExtractionMixin`] which contains most of the main methods. Users
     should refer to this superclass for more information regarding those methods.
 
+    ['GreaseLMFeatureExtractor'] convert CommonSenseQA or OpenBookQA question-answer example(s) into a
+    batch of graph encodings.
+
     Args:
-        do_resize (`bool`, *optional*, defaults to `True`):
+        cpnet_vocab_path (`Union[Path, str]`, defaults to concept.txt):
+            Path to the conceptnet vocabulary file.
+        patterns_path (`Union[Path, str]`, defaults to matcher_patterns.json):
+            Path to the matcher patterns file.
+        pruned_graph_path (`Union[Path, str]`, defaults to conceptnet_en_pruned.pickle.gz):
+            Path to the conceptnet graph file encoded as dict of dicts.
+        score_model (`Union[Path, str]`, defaults to roberta-large):
+            Path to the pretrained model to use for concept scoring.
+        device (`str`, defaults to "cuda"):
+            Device to use for the score model.
+        ctx_node_connects_all (`bool`, defaults to False):
+            Whether to connect all nodes to the context node. False by default
     """
 
     model_input_names = [""]
@@ -131,41 +145,55 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
     def __call__(
         self,
-        question_answer_example: List[Dict[str, Any]],
-        entailed_question_answer_example: List[Dict[str, Any]],
+        question_answer_example: Union[Dict[str, Any], List[Dict[str, Any]]],
+        entailed_question_answer_example: Union[Dict[str, Any], List[Dict[str, Any]]],
         num_choices: int = 5,
         return_tensors: Optional[Union[str, TensorType]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Main method to prepare for the model one or several image(s).
-
-        <Tip warning={true}>
-
-        NumPy arrays and PyTorch tensors are converted to PIL images when resizing, so the most efficient is to pass
-        PIL images.
-
-        </Tip>
+        Main method to encode a question-answer example(s) into a graph representation ready for model input.
 
         Args:
-            images (`PIL.Image.Image`, `np.ndarray`, `torch.Tensor`, `List[PIL.Image.Image]`, `List[np.ndarray]`, `List[torch.Tensor]`):
-                The image or batch of images to be prepared. Each image can be a PIL image, NumPy array or PyTorch
-                tensor. In case of a NumPy array/PyTorch tensor, each image should be of shape (C, H, W), where C is a
-                number of channels, H and W are image height and width.
+            question_answer_example (`List[Dict[str, Any]]`):
+                A question-answer example or a batch of question-answer examples from CommonSenseQA
+                or OpenBookQA datasets.
 
-            return_tensors (`str` or [`~utils.TensorType`], *optional*, defaults to `'np'`):
-                If set, will return tensors of a particular framework. Acceptable values are:
+            entailed_question_answer_example (`List[Dict[str, Any]]`):
+                An entailed question-answer example or a batch of question-answer examples from
+                CommonSenseQA or OpenBookQA datasets.
 
-                - `'tf'`: Return TensorFlow `tf.constant` objects.
-                - `'pt'`: Return PyTorch `torch.Tensor` objects.
-                - `'np'`: Return NumPy `np.ndarray` objects.
-                - `'jax'`: Return JAX `jnp.ndarray` objects.
+            num_choices (`int`, *optional*, defaults to `5`):
+                Number of choices to in the input example
+
+            return_tensors (`str` or [`~utils.TensorType`], *optional*, defaults to `'pt'`):
+                Currently, only pt is supported.
 
         Returns:
-            [`BatchFeature`]: A [`BatchFeature`] with the following fields:
+            [`dict`]: A [`dict`] with the following fields:
 
-            - **pixel_values** -- Pixel values to be fed to a model.
+            - concept_ids: (batch_size, num_choices, max_node_num)
+            - node_type_ids: (batch_size, num_choices, max_node_num)
+            - node_scores: (batch_size, num_choices, max_node_num, 1)
+            - adj_lengths: (batch_size,　num_choices)
+            - special_nodes_mask: (batch_size, num_choices, max_node_num)
+            - edge_index: list of size (batch_size, num_choices), where each entry is tensor[2, E]
+            - edge_type: list of size (batch_size, num_choices), where each entry is tensor[E, ]
         """
+        # Check for valid input
+        if isinstance(question_answer_example, list) and isinstance(entailed_question_answer_example, list):
+            assert len(question_answer_example) == len(entailed_question_answer_example)
+            assert all([isinstance(e, dict) for e in question_answer_example]) and \
+                   all([isinstance(e, dict) for e in entailed_question_answer_example])
+        elif isinstance(question_answer_example, dict) and isinstance(entailed_question_answer_example, dict):
+            # add batch dimension
+            question_answer_example = [question_answer_example]
+            entailed_question_answer_example = [entailed_question_answer_example]
+        else:
+            raise ValueError("Input parameters 'question_answer_example' and 'entailed_question_answer_example' must be"
+                             " a Union[Dict[str, Any], List[Dict[str, Any]]] not "
+                             f"{type(question_answer_example)} and {type(entailed_question_answer_example)}")
+
         batch_features = []
         for question_answer_example, entailed_statement in zip(
             question_answer_example, entailed_question_answer_example
