@@ -16,27 +16,24 @@
 import gzip
 import itertools
 import json
-import logging
 import os
 import pickle
-import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
-import torch
-from torch.nn import CrossEntropyLoss
-
 import spacy
-from spacy.matcher import Matcher
+import torch
 from huggingface_hub import hf_hub_download
-from transformers import AutoModelForMaskedLM, AutoTokenizer
+from spacy.matcher import Matcher
+from torch.nn import CrossEntropyLoss
+from .greaselm_utils import nltk_stopwords
 
-from ...feature_extraction_utils import BatchFeature, FeatureExtractionMixin, PreTrainedFeatureExtractor
+from transformers import AutoModelForMaskedLM, AutoTokenizer
+from ...feature_extraction_utils import FeatureExtractionMixin, PreTrainedFeatureExtractor
 from ...utils import TensorType, logging
 from ...utils.logging import get_verbosity, tqdm
-
 
 blacklist = [
     "-PRON-",
@@ -81,27 +78,6 @@ merged_relations = [
 ]
 
 
-"""
-English stop words taken from NLTK and expanded to avoid NLTK dependency
-For more details see https://github.com/nltk/nltk#copyright , https://github.com/nltk/nltk/blob/develop/LICENSE.txt and 
-https://github.com/nltk/nltk/blob/develop/AUTHORS.md
-"""
-nltk_stopwords = ['i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're", "you've", "you'll",
-                  "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', "she's",
-                  'her', 'hers', 'herself', 'it', "it's", 'its', 'itself', 'they', 'them', 'their', 'theirs',
-                  'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', "that'll", 'these', 'those', 'am', 'is',
-                  'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did',
-                  'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at',
-                  'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after',
-                  'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again',
-                  'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both',
-                  'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same',
-                  'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', "don't", 'should', "should've",
-                  'now', 'd', 'll', 'm', 'o', 're', 've', 'y', 'ain', 'aren', "aren't", 'couldn', "couldn't", 'didn',
-                  "didn't", 'doesn', "doesn't", 'hadn', "hadn't", 'hasn', "hasn't", 'haven', "haven't", 'isn', "isn't",
-                  'ma', 'mightn', "mightn't", 'mustn', "mustn't", 'needn', "needn't", 'shan', "shan't", 'shouldn',
-                  "shouldn't", 'wasn', "wasn't", 'weren', "weren't", 'won', "won't", 'wouldn', "wouldn't"]
-
 logger = logging.get_logger(__name__)
 
 
@@ -122,7 +98,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         self,
         cpnet_vocab_path: Union[Path, str] = "concept.txt",
         pattern_path: Union[Path, str] = "matcher_patterns.json",
-        pruned_graph_path: Union[Path, str] = "conceptnet.en.pruned.graph",
+        pruned_graph_path: Union[Path, str] = "conceptnet_en_pruned.pickle.gz",
         score_model: Union[Path, str] = "roberta-large",
         device: str = "cuda",
         cxt_node_connects_all: bool = False,
@@ -281,7 +257,6 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         if answer is not None:
             ans_matcher = Matcher(self.nlp.vocab)
             ans_words = self.nlp(answer)
-            # print(ans_words)
             ans_matcher.add(answer, [[{"TEXT": token.text.lower()} for token in ans_words]])
 
             ans_match = ans_matcher(doc)
@@ -296,19 +271,11 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
             span = doc[start:end].text  # the matched span
 
-            # a word that appears in answer is not considered as a mention in the question
-            # if len(set(span.split(" ")).intersection(set(ans.split(" ")))) > 0:
-            #     continue
             original_concept = self.nlp.vocab.strings[match_id]
             original_concept_set = set()
             original_concept_set.add(original_concept)
 
-            # print("span", span)
-            # print("concept", original_concept)
-            # print("Matched '" + span + "' to the rule '" + string_id)
-
             # why do you lemmatize a mention whose len == 1?
-
             if len(original_concept.split("_")) == 1:
                 # tag = doc[start].tag_
                 # if tag in ['VBN', 'VBG']:
@@ -322,14 +289,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
         for span, concepts in span_to_concepts.items():
             concepts_sorted = list(concepts)
-            # print("span:")
-            # print(span)
-            # print("concept_sorted:")
-            # print(concepts_sorted)
             concepts_sorted.sort(key=len)
-
-            # mentioned_concepts.update(concepts_sorted[0:2])
-
             shortest = concepts_sorted[0:3]
 
             for c in shortest:
@@ -349,8 +309,6 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             exact_match = set(
                 [concept for concept in concepts_sorted if concept.replace("_", " ").lower() == span.lower()]
             )
-            # print("exact match:")
-            # print(exact_match)
             assert len(exact_match) < 2
             mentioned_concepts.update(exact_match)
         return mentioned_concepts
@@ -380,10 +338,8 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         sent = " ".join([t.text for t in doc])
         if sent in self.cpnet_vocab:
             res.add(sent)
-        try:
-            assert len(res) > 0
-        except Exception:
-            print(f"for {sent}, concept not found in hard grounding.")
+        if len(res) == 0:
+            logger.warning(f"{sent} is not in the vocab, therefore is was not grounded")
         return res
 
     def match_mentioned_concepts(self, statements: List[str], answers: List[str]):
@@ -429,13 +385,6 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
                 assert len(prune_ac) > 0 and len(prune_qc) > 0
             except Exception as e:
                 pass
-                # print("In pruning")
-                # print(prune_qc)
-                # print(prune_ac)
-                # print("original:")
-                # print(qc)
-                # print(ac)
-                # print()
             item["qc"] = prune_qc
             item["ac"] = prune_ac
 
@@ -468,10 +417,6 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
         for answer in common_sense_example["question"]["choices"]:
             ans = answer["text"]
-            try:
-                assert all([i != "_" for i in ans])
-            except Exception:
-                print(ans)
             answers.append(ans)
 
         grounded_concepts = self.match_mentioned_concepts(statements, answers)
