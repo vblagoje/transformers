@@ -39,7 +39,7 @@ from ...modeling_utils import PreTrainedModel
 from ...pytorch_utils import apply_chunking_to_forward, find_pruneable_heads_and_indices, prune_linear_layer
 from ...utils import (
     add_start_docstrings,
-    logging, ModelOutput,
+    logging, ModelOutput, add_start_docstrings_to_model_forward, replace_return_docstrings,
 )
 
 logger = logging.get_logger(__name__)
@@ -978,21 +978,21 @@ GREASELM_START_DOCSTRING = r"""
 
 GREASELM_INPUTS_DOCSTRING = r"""
     Args:
-        input_ids (`torch.LongTensor` of shape `({0})`):
+        input_ids (`torch.LongTensor` of shape `(batch_size, seq_len)`):
             Indices of input sequence tokens in the vocabulary.
 
             Indices can be obtained using [`RobertaTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
 
             [What are input IDs?](../glossary#input-ids)
-        attention_mask (`torch.FloatTensor` of shape `({0})`, *optional*):
+        attention_mask (`torch.FloatTensor` of shape `(batch_size, seq_len)`, *optional*):
             Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
 
             - 1 for tokens that are **not masked**,
             - 0 for tokens that are **masked**.
 
             [What are attention masks?](../glossary#attention-mask)
-        token_type_ids (`torch.LongTensor` of shape `({0})`, *optional*):
+        token_type_ids (`torch.LongTensor` of shape `(batch_size, seq_len)`, *optional*):
             Segment token indices to indicate first and second portions of the inputs. Indices are selected in `[0,
             1]`:
 
@@ -1000,29 +1000,53 @@ GREASELM_INPUTS_DOCSTRING = r"""
             - 1 corresponds to a *sentence B* token.
 
             [What are token type IDs?](../glossary#token-type-ids)
-        position_ids (`torch.LongTensor` of shape `({0})`, *optional*):
-            Indices of positions of each input sequence tokens in the position embeddings. Selected in the range `[0,
-            config.max_position_embeddings - 1]`.
-
-            [What are position IDs?](../glossary#position-ids)
-        head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
+        special_tokens_mask (`torch.FloatTensor` of shape `(batch_size, seq_len)`, *optional*):
             Mask to nullify selected heads of the self-attention modules. Mask values selected in `[0, 1]`:
 
             - 1 indicates the head is **not masked**,
             - 0 indicates the head is **masked**.
 
-        inputs_embeds (`torch.FloatTensor` of shape `({0}, hidden_size)`, *optional*):
-            Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation. This
-            is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
-            model's internal embedding lookup matrix.
+        concept_ids (`torch.LongTensor` of shape `(batch_size, number_of_choices, max_node_num)`):
+                 Resolved conceptnet ids.
+
+        node_type_ids (`torch.LongTensor` of shape `(batch_size, number_of_nodes)`):
+                   0 == question entity; 1 == answer choice entity; 2 == other node; 3 == context node
+
+        node_scores (`torch.FloatTensor` of shape `(batch_size, number_of_choices, max_node_num, 1)`):
+                 LM relevancy scores for each resolved conceptnet id
+
+        adj_lengths (`torch.LongTensor` of shape `(batch_size, number_of_choices)`):
+                 Adjacency matrix lengths for each batch sample.
+
+        special_nodes_mask (`torch.BoolTensor` of shape `(batch_size, number_of_nodes)`):
+                 Mask identifying special nodes in the graph (interaction node in the GreaseLM paper).
+
+        edge_index (`torch.tensor(2, E)`):
+                 Adjacency list where E is the total number of edges in the particular graph.
+
+        edge_type (`torch.tensor(E)`):
+                Adjacency list types torch.tensor(E, ) where E is the total number of edges in the particular graph.
+
+        position_ids (`torch.LongTensor` of shape `(batch_size, seq_len)`, `optional`, defaults to :obj:`None`):
+                 Indices of positions of each input sequence tokens in the position embeddings.
+
+        head_mask (list of shape `(num_hidden_layers)`):
+                 Head mask shape [num_hidden_layers]
+
+        emb_data (`torch.tensor(batch_size, number_of_choices, max_node_num, emb_dim)`):
+                 Contextual embdeddings
+
+        cache_output(`bool`, *optional*, defaults to False):
+                 Whether to cache the output of the language model.
+
         output_attentions (`bool`, *optional*):
             Whether or not to return the attentions tensors of all attention layers. See `attentions` under returned
             tensors for more detail.
+
         output_hidden_states (`bool`, *optional*):
             Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
             more detail.
-        return_dict (`bool`, *optional*):
-            Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
+
 """
 
 
@@ -1148,6 +1172,8 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         edge_type = torch.cat(edge_type_init, dim=0)  # [total_E,]
         return edge_index, edge_type
 
+    @add_start_docstrings_to_model_forward(GREASELM_INPUTS_DOCSTRING)
+    @replace_return_docstrings(output_type=GreaseLMModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
         input_ids,
