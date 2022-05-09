@@ -1173,7 +1173,6 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         return edge_index, edge_type
 
     @add_start_docstrings_to_model_forward(GREASELM_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=GreaseLMModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
         input_ids,
@@ -1190,10 +1189,9 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         position_ids=None,
         head_mask=None,
         emb_data=None,
-        cache_output=False,
         output_attentions=False,
         output_hidden_states=True,
-    ):
+    ) -> GreaseLMModelOutput:
         """
         :param input_ids:
               (:obj:`torch.LongTensor` of shape :obj:`(batch_size, seq_len)`):
@@ -1233,8 +1231,6 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
                  list of shape [num_hidden_layers]
         :param emb_data:
              torch.tensor(batch_size, number_of_choices, max_node_num, emb_dim)
-        :param cache_output:
-                 Whether to cache the output of the language model.
         :param output_attentions: (:obj:`bool`) Whether or not to return the attentions tensor.
         :param output_hidden_states: (:obj:`bool`, `optional`, defaults to :obj:`True`):
                  If set to ``True``, the model will return all hidden-states.
@@ -1451,9 +1447,7 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         edge_type,
         labels=None,
         emb_data=None,
-        detail=False,
-        cache_output=False,
-    ):
+    ) -> MultipleChoiceModelOutput:
         """
         :param input_ids:
               (:obj:`torch.LongTensor` of shape :obj:`(batch_size, number_of_choices, seq_len)`):
@@ -1494,10 +1488,7 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
                    `input_ids` above)
         :param emb_data:
                torch.tensor(batch_size, number_of_choices, max_node_num, emb_dim)
-        :param detail:
-               (bool): Whether to return detailed output.
-        :param cache_output:
-               Whether to cache the output of the language model.
+               Contextualized embedding data.
         """
         bs, nc = input_ids.shape[0:2]
 
