@@ -36,8 +36,34 @@ import torch.utils.checkpoint
 from torch import Tensor
 from torch.autograd import Variable
 from torch.utils.hooks import RemovableHandle
-from torch_scatter import gather_csr, scatter, segment_csr
-from torch_sparse import SparseTensor
+
+
+from ...utils import is_scatter_available, is_sparse_available
+from ...utils import logging
+
+logger = logging.get_logger(__name__)
+
+# soft dependency
+if is_scatter_available():
+    try:
+        from torch_scatter import gather_csr, scatter, segment_csr
+    except OSError:
+        logger.error(
+            "GreaseLM models are not usable since `torch_scatter` can't be loaded. "
+            "It seems you have `torch_scatter` installed with the wrong CUDA version. "
+            "Please try to reinstall it following the instructions here: https://github.com/rusty1s/pytorch_scatter."
+        )
+
+# soft dependency
+if is_sparse_available():
+    try:
+        from torch_sparse import SparseTensor
+    except OSError:
+        logger.error(
+            "GreaseLM models are not usable since `torch_sparse` can't be loaded. "
+            "It seems you have `torch_sparse` installed with the wrong CUDA version. "
+            "Please try to reinstall it following the instructions here: https://github.com/rusty1s/pytorch_sparse."
+        )
 
 
 # String used to indicate a blank

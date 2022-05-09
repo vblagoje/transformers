@@ -71,7 +71,7 @@ from .utils import (
     is_torchaudio_available,
     is_vision_available,
 )
-
+from .utils.import_utils import is_sparse_available
 
 SMALL_MODEL_IDENTIFIER = "julien-c/bert-xsmall-dummy"
 DUMMY_UNKNOWN_IDENTIFIER = "julien-c/dummy-unknown"
@@ -283,6 +283,16 @@ def require_torch_scatter(test_case):
     return unittest.skipUnless(is_scatter_available(), "test requires PyTorch scatter")(test_case)
 
 
+def require_torch_sparse(test_case):
+    """
+    Decorator marking a test that requires PyTorch sparse.
+
+    These tests are skipped when PyTorch sparse isn't installed.
+
+    """
+    return unittest.skipUnless(is_scatter_available(), "test requires PyTorch scatter")(test_case)
+
+
 def require_tensorflow_probability(test_case):
     """
     Decorator marking a test that requires TensorFlow probability.
@@ -357,6 +367,14 @@ def require_scatter(test_case):
     installed.
     """
     return unittest.skipUnless(is_scatter_available(), "test requires PyTorch Scatter")(test_case)
+
+
+def require_sparse(test_case):
+    """
+    Decorator marking a test that requires PyTorch Sparse. These tests are skipped when PyTorch Sparse isn't
+    installed.
+    """
+    return unittest.skipUnless(is_sparse_available(), "test requires PyTorch Sparse")(test_case)
 
 
 def require_pytorch_quantization(test_case):

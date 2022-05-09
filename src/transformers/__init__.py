@@ -32,6 +32,7 @@ from .utils import (
     _LazyModule,
     is_flax_available,
     is_scatter_available,
+    is_sparse_available,
     is_sentencepiece_available,
     is_speech_available,
     is_tf_available,
@@ -606,6 +607,24 @@ else:
         name for name in dir(dummy_scatter_objects) if not name.startswith("_")
     ]
 
+if is_scatter_available() and is_sparse_available():
+    _import_structure["models.greaselm"].extend(
+        [
+            "GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "GreaseLMFeatureExtractor",
+            "GreaseLMForMultipleChoice",
+            "GreaseLMModel",
+            "GreaseLMPreTrainedModel",
+            "GreaseLMProcessor",
+        ]
+    )
+else:
+    from .utils import dummy_scatter_objects
+
+    _import_structure["utils.dummy_scatter_objects"] = [
+        name for name in dir(dummy_scatter_objects) if not name.startswith("_")
+    ]
+
 
 # PyTorch-backed objects
 if is_torch_available():
@@ -1080,16 +1099,6 @@ if is_torch_available():
             "GPTJForSequenceClassification",
             "GPTJModel",
             "GPTJPreTrainedModel",
-        ]
-    )
-    _import_structure["models.greaselm"].extend(
-        [
-            "GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
-            "GreaseLMFeatureExtractor",
-            "GreaseLMForMultipleChoice",
-            "GreaseLMModel",
-            "GreaseLMPreTrainedModel",
-            "GreaseLMProcessor",
         ]
     )
     _import_structure["models.hubert"].extend(
@@ -2009,24 +2018,6 @@ if is_tf_available():
             "TFGPTJPreTrainedModel",
         ]
     )
-    _import_structure["models.greaselm"].extend(
-        [
-            "TF_GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
-            "TFGreaseLMForMultipleChoice",
-            "TFGreaseLMMainLayer",
-            "TFGreaseLMModel",
-            "TFGreaseLMPreTrainedModel",
-        ]
-    )
-    _import_structure["models.greaselm"].extend(
-        [
-            "TF_GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
-            "TFGreaseLMForMultipleChoice",
-            "TFGreaseLMMainLayer",
-            "TFGreaseLMModel",
-            "TFGreaseLMPreTrainedModel",
-        ]
-    )
     _import_structure["models.hubert"].extend(
         [
             "TF_HUBERT_PRETRAINED_MODEL_ARCHIVE_LIST",
@@ -2430,20 +2421,6 @@ if is_flax_available():
         ["FlaxGPTNeoForCausalLM", "FlaxGPTNeoModel", "FlaxGPTNeoPreTrainedModel"]
     )
     _import_structure["models.gptj"].extend(["FlaxGPTJForCausalLM", "FlaxGPTJModel", "FlaxGPTJPreTrainedModel"])
-    _import_structure["models.greaselm"].extend(
-        [
-            "FlaxGreaseLMForMultipleChoice",
-            "FlaxGreaseLMModel",
-            "FlaxGreaseLMPreTrainedModel",
-        ]
-    )
-    _import_structure["models.greaselm"].extend(
-        [
-            "FlaxGreaseLMForMultipleChoice",
-            "FlaxGreaseLMModel",
-            "FlaxGreaseLMPreTrainedModel",
-        ]
-    )
     _import_structure["models.marian"].extend(
         [
             "FlaxMarianModel",
@@ -3011,6 +2988,18 @@ if TYPE_CHECKING:
     else:
         from .utils.dummy_scatter_objects import *
 
+    if is_scatter_available() and is_sparse_available():
+        from .models.greaselm import (
+            GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
+            GreaseLMFeatureExtractor,
+            GreaseLMForMultipleChoice,
+            GreaseLMModel,
+            GreaseLMPreTrainedModel,
+            GreseLMProcessor,
+        )
+    else:
+        from .utils.dummy_scatter_objects import *
+
     if is_torch_available():
         # Benchmarks
         from .benchmark.benchmark import PyTorchBenchmark
@@ -3416,14 +3405,6 @@ if TYPE_CHECKING:
             GPTJForSequenceClassification,
             GPTJModel,
             GPTJPreTrainedModel,
-        )
-        from .models.greaselm import (
-            GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
-            GreaseLMFeatureExtractor,
-            GreaseLMForMultipleChoice,
-            GreaseLMModel,
-            GreaseLMPreTrainedModel,
-            GreseLMProcessor,
         )
         from .models.hubert import (
             HUBERT_PRETRAINED_MODEL_ARCHIVE_LIST,

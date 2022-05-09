@@ -16,7 +16,8 @@ import unittest
 
 from transformers import GreaseLMFeatureExtractor, GreaseLMProcessor
 from transformers import RobertaTokenizer, RobertaTokenizerFast
-from transformers.testing_utils import require_tokenizers, require_torch, slow
+from transformers.testing_utils import require_tokenizers, require_torch, slow, require_torch_scatter, \
+    require_torch_sparse
 from transformers.utils import cached_property
 
 
@@ -36,6 +37,8 @@ class GreaseLMProcessorTest(unittest.TestCase):
 
 
 @require_torch
+@require_torch_scatter
+@require_torch_sparse
 class GreaseLMProcessorIntegrationTests(unittest.TestCase):
 
     @cached_property

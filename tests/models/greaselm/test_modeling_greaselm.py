@@ -19,7 +19,8 @@ import unittest
 from huggingface_hub import hf_hub_download
 from transformers import GreaseLMConfig, is_torch_available
 from transformers.modeling_outputs import MultipleChoiceModelOutput
-from transformers.testing_utils import TestCasePlus, require_torch, slow, torch_device
+from transformers.testing_utils import TestCasePlus, require_torch, slow, torch_device, require_torch_scatter, \
+    require_torch_sparse
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ids_tensor, random_attention_mask
@@ -288,6 +289,8 @@ class GreaseLMModelTester:
 
 
 @require_torch
+@require_torch_scatter
+@require_torch_sparse
 class GreaseLMModelTest(unittest.TestCase):
     all_model_classes = (
         (
@@ -326,6 +329,8 @@ class GreaseLMModelTest(unittest.TestCase):
 
 
 @require_torch
+@require_torch_scatter
+@require_torch_sparse
 class GreaseLMModelIntegrationTest(TestCasePlus):
 
     def test_inference_no_head(self):

@@ -29,12 +29,12 @@ from huggingface_hub import hf_hub_download
 from packaging import version
 from torch import nn
 from torch.nn import CrossEntropyLoss
-from torch_scatter import scatter
 
 from .configuration_greaselm import GreaseLMConfig
 from .utils_greaselm import softmax, MessagePassing, make_one_hot, freeze_net
+from ...utils import is_scatter_available
 from ...activations import ACT2FN
-from ...modeling_outputs import MultipleChoiceModelOutput, BaseModelOutputWithCrossAttentions, BaseModelOutput
+from ...modeling_outputs import MultipleChoiceModelOutput
 from ...modeling_utils import PreTrainedModel
 from ...pytorch_utils import apply_chunking_to_forward, find_pruneable_heads_and_indices, prune_linear_layer
 from ...utils import (
@@ -43,6 +43,17 @@ from ...utils import (
 )
 
 logger = logging.get_logger(__name__)
+
+# soft dependency
+if is_scatter_available():
+    try:
+        from torch_scatter import scatter
+    except OSError:
+        logger.error(
+            "GreaseLM models are not usable since `torch_scatter` can't be loaded. "
+            "It seems you have `torch_scatter` installed with the wrong CUDA version. "
+            "Please try to reinstall it following the instructions here: https://github.com/rusty1s/pytorch_scatter."
+        )
 
 _CHECKPOINT_FOR_DOC = "Xikun/greaselm-csqa"
 _CONFIG_FOR_DOC = "GreaseLMConfig"

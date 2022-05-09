@@ -21,7 +21,7 @@ from typing import Union
 from transformers import GreaseLMFeatureExtractor
 from transformers.models.greaselm.utils_greaselm import convert_commonsenseqa_to_entailment, \
     convert_openbookqa_to_entailment
-from transformers.testing_utils import require_torch, slow
+from transformers.testing_utils import require_torch, slow, require_torch_scatter
 
 from ...test_feature_extraction_common import FeatureExtractionSavingTestMixin
 
@@ -53,6 +53,8 @@ class GreaseLMFeatureExtractionTester(unittest.TestCase):
 
 
 @require_torch
+@require_torch_scatter
+@require_torch_sparse
 class GreaseLMFeatureExtractionTest(FeatureExtractionSavingTestMixin, unittest.TestCase):
     feature_extraction_class = GreaseLMFeatureExtractor
 
