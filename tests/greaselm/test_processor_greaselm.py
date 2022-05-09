@@ -46,7 +46,7 @@ class GreaseLMProcessorIntegrationTests(unittest.TestCase):
 
     @slow
     def test_processor_common_sense_qa(self):
-        feature_extractor = GreaseLMFeatureExtractor.from_pretrained("vblagoje/greaselm-csqa")
+        feature_extractor = GreaseLMFeatureExtractor.from_pretrained("Xikun/greaselm-csqa")
         tokenizers = self.get_tokenizers
         csqa_example1 = {"answerKey": "A", "id": "1afa02df02c908a558b4036e80242fac",
                          "question": {"question_concept": "revolving door",
@@ -78,7 +78,7 @@ class GreaseLMProcessorIntegrationTests(unittest.TestCase):
 
     @slow
     def test_processor_openbook_qa(self):
-        feature_extractor = GreaseLMFeatureExtractor.from_pretrained("vblagoje/greaselm-obqa")
+        feature_extractor = GreaseLMFeatureExtractor.from_pretrained("Xikun/greaselm-obqa")
         tokenizers = self.get_tokenizers
 
         obqa_example1 = {"id": "7-97",

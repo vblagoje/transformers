@@ -189,7 +189,7 @@ class GreaseLMModelTester:
         edge_index,
         edge_type,
     ):
-        concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
+        concept_emb = hf_hub_download(repo_id="Xikun/greaselm-csqa", filename="tzw.ent.npy")
         model = GreaseLMModel(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
         model.eval()
@@ -220,7 +220,7 @@ class GreaseLMModelTester:
         node_feature_extra,
         special_nodes_mask,
     ):
-        concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
+        concept_emb = hf_hub_download(repo_id="Xikun/greaselm-csqa", filename="tzw.ent.npy")
         model = GreaseLMModel(config=self.get_config(), pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
         model.eval()
@@ -254,7 +254,7 @@ class GreaseLMModelTester:
         edge_type,
     ):
         config.num_choices = self.num_choices
-        concept_emb = hf_hub_download(repo_id="vblagoje/greaselm", filename="tzw.ent.npy")
+        concept_emb = hf_hub_download(repo_id="Xikun/greaselm-csqa", filename="tzw.ent.npy")
         model = GreaseLMForMultipleChoice(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
         model(
@@ -331,4 +331,4 @@ class GreaseLMModelTest(unittest.TestCase):
 class GreaseLMModelIntegrationTest(TestCasePlus):
     @slow
     def test_inference_no_head(self):
-        model = GreaseLMModel.from_pretrained("vblagoje/greaselm")
+        model = GreaseLMModel.from_pretrained("Xikun/greaselm-csqa")

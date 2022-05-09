@@ -25,8 +25,8 @@ from ...utils import logging
 logger = logging.get_logger(__name__)
 
 GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "vblagoje/greaselm-csqa": "https://huggingface.co/vblagoje/greaselm-csqa/resolve/main/config.json",
-    "vblagoje/greaselm-obqa": "https://huggingface.co/vblagoje/greaselm-obqa/resolve/main/config.json",
+    "Xikun/greaselm-csqa": "https://huggingface.co/Xikun/greaselm-csqa/resolve/main/config.json",
+    "Xikun/greaselm-obqa": "https://huggingface.co/Xikun/greaselm-obqa/resolve/main/config.json",
 }
 
 
@@ -35,7 +35,7 @@ class GreaseLMConfig(PretrainedConfig):
     This is the configuration class to store the configuration of a [`GreaseLMModel`] or a [`TFGreaseLMModel`]. It is
     used to instantiate a greaselm model according to the specified arguments, defining the model architecture.
     Instantiating a configuration with the defaults will yield a similar configuration to that of the greaselm
-    [vblagoje/greaselm-csqa](https://huggingface.co/vblagoje/greaselm-csqa) architecture.
+    [Xikun/greaselm-csqa](https://huggingface.co/Xikun/greaselm-csqa) architecture.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.

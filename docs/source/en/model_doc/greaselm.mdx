@@ -45,9 +45,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 def index_to_answer(index, choices=["A", "B", "C", "D", "E"]):
     return choices[index]
 
-proc = GreaseLMProcessor.from_pretrained("vblagoje/greaselm-csqa")
+proc = GreaseLMProcessor.from_pretrained("Xikun/greaselm-csqa")
 
-model = GreaseLMForMultipleChoice.from_pretrained("vblagoje/greaselm-csqa")
+model = GreaseLMForMultipleChoice.from_pretrained("Xikun/greaselm-csqa")
 _ = model.to(device)
 _ = model.eval()
 

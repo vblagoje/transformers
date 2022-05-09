@@ -43,13 +43,13 @@ from ...utils import (
 
 logger = logging.get_logger(__name__)
 
-_CHECKPOINT_FOR_DOC = "vblagoje/greaselm-csqa"
+_CHECKPOINT_FOR_DOC = "Xikun/greaselm-csqa"
 _CONFIG_FOR_DOC = "GreaseLMConfig"
 _TOKENIZER_FOR_DOC = "RobertaTokenizer"
 
 GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "vblagoje/greaselm-csqa",
-    "vblagoje/greaselm-obqa",
+    "Xikun/greaselm-csqa",
+    "Xikun/greaselm-obqa",
     # See all greaselm models at https://huggingface.co/models?filter=greaselm
 ]
 

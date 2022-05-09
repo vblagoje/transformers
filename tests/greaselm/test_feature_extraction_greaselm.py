@@ -58,7 +58,7 @@ class GreaseLMFeatureExtractionTest(FeatureExtractionSavingTestMixin, unittest.T
 
     def setUp(self):
         self.feature_extract_tester = GreaseLMFeatureExtractionTester()
-        self.fe = GreaseLMFeatureExtractor.from_pretrained("vblagoje/greaselm-csqa", device="cpu")
+        self.fe = GreaseLMFeatureExtractor.from_pretrained("Xikun/greaselm-csqa", device="cpu")
 
     @property
     def feat_extract_dict(self):
