@@ -16,6 +16,7 @@
 """PyTorch greaselm model."""
 import math
 import os
+from dataclasses import dataclass
 from os.path import exists as file_exists
 from typing import Optional, Union
 from typing import Tuple
@@ -33,12 +34,12 @@ from torch_scatter import scatter
 from .configuration_greaselm import GreaseLMConfig
 from .utils_greaselm import softmax, MessagePassing, make_one_hot, freeze_net
 from ...activations import ACT2FN
-from ...modeling_outputs import MultipleChoiceModelOutput
+from ...modeling_outputs import MultipleChoiceModelOutput, BaseModelOutputWithCrossAttentions, BaseModelOutput
 from ...modeling_utils import PreTrainedModel
 from ...pytorch_utils import apply_chunking_to_forward, find_pruneable_heads_and_indices, prune_linear_layer
 from ...utils import (
     add_start_docstrings,
-    logging,
+    logging, ModelOutput,
 )
 
 logger = logging.get_logger(__name__)
@@ -54,6 +55,32 @@ GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST = [
 ]
 
 _CONCEPT_EMBEDDINGS_FILE_NAME = "tzw.ent.npy"
+
+
+@dataclass
+class GreaseLMModelOutput(ModelOutput):
+    """
+    GreaseLM model's outputs, with LM and GNN hidden states and attentions
+
+    Args:
+        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
+            Sequence of hidden-states at the output of the last layer of the model.
+        last_hidden_gnn_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
+            Sequence of hidden-states at the output of the last layer of the GNN model.
+        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
+            Tuple of `torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer) of
+            shape `(batch_size, sequence_length, hidden_size)`. Hidden-states of the model at the output of each layer
+            plus the initial embedding outputs.
+        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
+            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+            sequence_length)`. Attentions weights after the attention softmax, used to compute the weighted average in
+            the self-attention heads.
+    """
+
+    last_hidden_state: torch.FloatTensor = None
+    last_hidden_gnn_state: torch.FloatTensor = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
 class GATConvE(MessagePassing):
@@ -462,19 +489,18 @@ class GreaseLMEncoder(nn.Module):
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        outputs = (hidden_states,)
-        if output_hidden_states:
-            outputs = outputs + (all_hidden_states,)
-        if output_attentions:
-            outputs = outputs + (all_attentions,)
-        return outputs, _X  # last-layer hidden state, (all hidden states), (all attentions)
-        # return BaseModelOutputWithPastAndCrossAttentions(
-        #     last_hidden_state=hidden_states,
-        #     past_key_values=next_decoder_cache,
-        #     hidden_states=all_hidden_states,
-        #     attentions=all_self_attentions,
-        #     cross_attentions=all_cross_attentions,
-        # )
+        # outputs = (hidden_states,)
+        # if output_hidden_states:
+        #     outputs = outputs + (all_hidden_states,)
+        # if output_attentions:
+        #     outputs = outputs + (all_attentions,)
+        return GreaseLMModelOutput(
+            last_hidden_state=hidden_states,
+            last_hidden_gnn_state=_X,
+            hidden_states=all_hidden_states,
+            attentions=all_attentions,
+        )
+
 
 
 # Copied from transformers.models.roberta.modeling_roberta.RobertaEmbeddings with Roberta->GreaseLM
@@ -1139,6 +1165,7 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         head_mask=None,
         emb_data=None,
         cache_output=False,
+        output_attentions=False,
         output_hidden_states=True,
     ):
         """
@@ -1182,6 +1209,7 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
              torch.tensor(batch_size, number_of_choices, max_node_num, emb_dim)
         :param cache_output:
                  Whether to cache the output of the language model.
+        :param output_attentions: (:obj:`bool`) Whether or not to return the attentions tensor.
         :param output_hidden_states: (:obj:`bool`, `optional`, defaults to :obj:`True`):
                  If set to ``True``, the model will return all hidden-states.
 
@@ -1314,7 +1342,7 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         )  # [`total_n_nodes`, dim]
 
         # Merged core
-        encoder_outputs, _X = self.encoder(
+        encoder_output = self.encoder(
             embedding_output,
             extended_attention_mask,
             special_tokens_mask,
@@ -1325,16 +1353,12 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
             _node_type,
             _node_feature_extra,
             special_nodes_mask,
+            output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
         )
 
         # LM outputs
-        sequence_output = encoder_outputs[0]
-        pooled_output = self.pooler(sequence_output)
-
-        outputs = (sequence_output, pooled_output,) + encoder_outputs[
-            1:
-        ]  # add hidden_states and attentions if they are here
+        sequence_output = encoder_output[0]
 
         # GNN outputs
         X = _X.view(node_type_ids.size(0), node_type_ids.size(1), -1)  # [batch_size, n_node, dim]
@@ -1342,13 +1366,17 @@ class GreaseLMModel(GreaseLMPreTrainedModel):
         output = self.activation(self.Vh(H) + self.Vx(X))
         output = self.dropout(output)
 
-        return outputs, output
+        return GreaseLMModelOutput(
+            last_hidden_state=sequence_output,
+            last_hidden_gnn_state=output,
+            hidden_states=encoder_output.hidden_states,
+            attentions=encoder_output.attentions,
+        )
 
 
 @add_start_docstrings(
     """
-    GreaseLM Model with a multiple choice classification head on top (a linear layer on top of the pooled output and a
-    softmax) e.g. for RocStories/SWAG tasks.
+    GreaseLM Model with a multiple choice classification head on top for CommonsSenseQA and OpenBookQA tasks.
     """,
     GREASELM_START_DOCSTRING,
 )
@@ -1448,7 +1476,7 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         bs, nc = input_ids.shape[0:2]
 
         # Merged core
-        outputs, gnn_output = self.greaselm(
+        output = self.greaselm(
             input_ids,
             attention_mask,
             token_type_ids,
@@ -1465,13 +1493,13 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         # gnn_output: [bs, n_node, dim_node]
 
         # LM outputs
-        all_hidden_states = outputs[-1]  # ([bs, seq_len, sent_dim] for _ in range(25))
+        all_hidden_states = output.hidden_states  # ([bs, seq_len, sent_dim] for _ in range(25))
         hidden_states = all_hidden_states[self.layer_id]  # [bs, seq_len, sent_dim]
 
         sent_vecs = self.greaselm.pooler(hidden_states)  # [bs, sent_dim]
 
         # GNN outputs
-        Z_vecs = gnn_output[:, 0]  # (batch_size, dim_node)
+        Z_vecs = output.last_hidden_gnn_state[:, 0]  # (batch_size, dim_node)
 
         # Flatten first two dimensions (batch_size, number_of_choices)
         node_type_ids = torch.flatten(node_type_ids, start_dim=0, end_dim=1)
@@ -1483,7 +1511,7 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
         mask = mask | (node_type_ids == 3)  # pool over all KG nodes (excluding the context node)
         mask[mask.all(1), 0] = 0  # a temporary solution to avoid zero node
 
-        graph_vecs, pool_attn = self.pooler(sent_vecs, gnn_output, mask)
+        graph_vecs, pool_attn = self.pooler(sent_vecs, output.last_hidden_gnn_state, mask)
         # graph_vecs: [bs, node_dim]
 
         concat = torch.cat((graph_vecs, sent_vecs, Z_vecs), 1)
