@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Union
 
 from transformers import GreaseLMFeatureExtractor
-from transformers.models.greaselm.convert_csqa import convert_commonsenseqa_to_entailment, \
+from transformers.models.greaselm.utils_greaselm import convert_commonsenseqa_to_entailment, \
     convert_openbookqa_to_entailment
 from transformers.testing_utils import require_torch, slow
 
-from ..test_feature_extraction_common import FeatureExtractionSavingTestMixin
+from ...test_feature_extraction_common import FeatureExtractionSavingTestMixin
 
 
 class GreaseLMFeatureExtractionTester(unittest.TestCase):
