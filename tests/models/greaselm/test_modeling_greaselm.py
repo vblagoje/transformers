@@ -18,6 +18,7 @@ import unittest
 
 from huggingface_hub import hf_hub_download
 from transformers import GreaseLMConfig, is_torch_available
+from transformers.modeling_outputs import MultipleChoiceModelOutput
 from transformers.testing_utils import TestCasePlus, require_torch, slow, torch_device
 
 from ...test_configuration_common import ConfigTester
@@ -28,8 +29,8 @@ if is_torch_available():
 
     from transformers import GreaseLMForMultipleChoice, GreaseLMModel
     from transformers.models.greaselm.modeling_greaselm import (
-        GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
-    )
+        GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST, GreaseLMModelOutput,
+)
 
 
 class GreaseLMModelTester:
@@ -198,14 +199,10 @@ class GreaseLMModelTester:
                        edge_index=edge_index,
                        edge_type=edge_type)
 
-        self.parent.assertEqual(len(result), 2)
-        outputs = result[0]
-        gnn_outputs = result[1]
-        self.parent.assertEqual(len(outputs), 3)
-        self.parent.assertEqual(outputs[0].shape,
+        self.parent.assertTrue(isinstance(result, GreaseLMModelOutput))
+        self.parent.assertEqual(result.last_hidden_state.shape,
                                 (self.batch_size * self.num_choices, self.seq_length, self.hidden_size))
-        self.parent.assertEqual(outputs[1].shape, (self.batch_size * self.num_choices, self.hidden_size))
-        self.parent.assertEqual(gnn_outputs.shape,
+        self.parent.assertEqual(result.last_hidden_gnn_state.shape,
                                 (self.batch_size * self.num_choices, self.max_node_num, self.concept_dim))
 
     def create_and_check_encoder(
@@ -235,6 +232,8 @@ class GreaseLMModelTester:
                                node_type_ids,
                                node_feature_extra,
                                special_nodes_mask)
+
+        assert isinstance(result, GreaseLMModelOutput)
 
     def create_and_check_for_multiple_choice(
             self,
@@ -269,6 +268,7 @@ class GreaseLMModelTester:
                        edge_type=edge_type,
                        labels=labels)
 
+        self.parent.assertTrue(isinstance(result, MultipleChoiceModelOutput))
         self.parent.assertTrue("loss" in result)
         self.parent.assertEqual(result["logits"].shape, (self.batch_size, self.num_choices))
 
