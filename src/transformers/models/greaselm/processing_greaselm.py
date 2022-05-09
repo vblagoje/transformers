@@ -33,9 +33,9 @@ class GreaseLMProcessor(ProcessorMixin):
 
     [`GreaseLMProcessor`] offers all the functionalities you need to prepare data for the model.
 
-    It uses ['GreaseLMFeatureExtractor'] to convert CommonSenseQA or OpenBookQA question-answer example(s) into a
-    batch of graph encodings and then encodes examples into a batch of language model encodings, finally combining
-    graph and language model encodings into a model ready input.
+    It uses ['GreaseLMFeatureExtractor'] to convert CommonSenseQA or OpenBookQA question-answer example(s) into a batch
+    of graph encodings and then encodes examples into a batch of language model encodings, finally combining graph and
+    language model encodings into a model ready input.
 
 
     Args:
@@ -64,8 +64,8 @@ class GreaseLMProcessor(ProcessorMixin):
 
         Args:
         question_answer_example ('Union[Dict[str, Any], List[Dict[str, Any]]]'):
-            The input question answer example. It can be a single example or a list of examples
-            See CommonSenseQA and/or OpenBookQA examples for more information
+            The input question answer example. It can be a single example or a list of examples See CommonSenseQA
+            and/or OpenBookQA examples for more information
 
         Returns:
               [`dict`]: A [`dict`] with the following fields:
@@ -78,7 +78,7 @@ class GreaseLMProcessor(ProcessorMixin):
               - concept_ids: (batch_size, num_choices, max_node_num)
               - node_type_ids: (batch_size, num_choices, max_node_num)
               - node_scores: (batch_size, num_choices, max_node_num, 1)
-              - adj_lengths: (batch_size,　num_choices)
+              - adj_lengths: (batch_size, num_choices)
               - special_nodes_mask: (batch_size, num_choices, max_node_num)
               - edge_index: list of size (batch_size, num_choices), where each entry is tensor[2, E]
               - edge_type: list of size (batch_size, num_choices), where each entry is tensor[E, ]
@@ -90,8 +90,10 @@ class GreaseLMProcessor(ProcessorMixin):
             # add batch dimension
             question_answer_example = [question_answer_example]
         else:
-            raise ValueError("Input parameter 'question_answer_example' must be a "
-                             f"Union[Dict[str, Any], List[Dict[str, Any]]] not {type(question_answer_example)}")
+            raise ValueError(
+                "Input parameter 'question_answer_example' must be a "
+                f"Union[Dict[str, Any], List[Dict[str, Any]]] not {type(question_answer_example)}"
+            )
 
         converter = kwargs.get("question_answer_converter", None)
         if converter is None:
@@ -233,12 +235,11 @@ class LMKGEncoding(UserDict):
 
     def _to_device(self, obj: Any, device):
         """
-        Recursively peels of lists and tuples to tensors and moves them to the given device.
-        Note: we can't stack KG lists of tensors as they are of different sizes.
+        Recursively peels of lists and tuples to tensors and moves them to the given device. Note: we can't stack KG
+        lists of tensors as they are of different sizes.
 
-        :param obj: The object to be moved to the device
-        :param device: The device to put the model on
-        :return: A list of the items in the tuple or list that have been moved to the device.
+        :param obj: The object to be moved to the device :param device: The device to put the model on :return: A list
+        of the items in the tuple or list that have been moved to the device.
         """
         if isinstance(obj, (tuple, list)):
             return [self._to_device(item, device) for item in obj]

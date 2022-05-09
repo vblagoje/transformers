@@ -40,10 +40,13 @@ Tips:
 ```python
 import torch
 from transformers import GreaseLMProcessor, GreaseLMForMultipleChoice
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def index_to_answer(index, choices=["A", "B", "C", "D", "E"]):
     return choices[index]
+
 
 proc = GreaseLMProcessor.from_pretrained("Xikun/greaselm-csqa")
 
@@ -51,14 +54,21 @@ model = GreaseLMForMultipleChoice.from_pretrained("Xikun/greaselm-csqa")
 _ = model.to(device)
 _ = model.eval()
 
-csqa = {"answerKey": "A", "id": "1afa02df02c908a558b4036e80242fac",
-        "question": {"question_concept": "revolving door",
-                     "choices": [{"label": "A", "text": "bank"},
-                                 {"label": "B", "text": "library"},
-                                 {"label": "C", "text": "department store"},
-                                 {"label": "D", "text": "mall"},
-                                 {"label": "E", "text": "new york"}],
-                     "stem": "A revolving door is convenient for two direction travel, but it also serves as a security measure at a what?"}}
+csqa = {
+    "answerKey": "A",
+    "id": "1afa02df02c908a558b4036e80242fac",
+    "question": {
+        "question_concept": "revolving door",
+        "choices": [
+            {"label": "A", "text": "bank"},
+            {"label": "B", "text": "library"},
+            {"label": "C", "text": "department store"},
+            {"label": "D", "text": "mall"},
+            {"label": "E", "text": "new york"},
+        ],
+        "stem": "A revolving door is convenient for two direction travel, but it also serves as a security measure at a what?",
+    },
+}
 
 batch = proc(csqa)
 
@@ -67,13 +77,12 @@ labels = batch["labels"]
 
 results = output.logits.argmax(1) == labels
 for idx, r in enumerate(results):
-  model_answer = index_to_answer(output.logits.argmax(1)[idx].item())
-  correct_answer = index_to_answer(labels[idx].item())
-  if r:
-     print(f"For the question {idx}, model answered correctly, answer is {model_answer}")
-  else:
-     print(f"For the question {idx}, model answered incorrectly, answer is not {model_answer} but {correct_answer}")
-
+    model_answer = index_to_answer(output.logits.argmax(1)[idx].item())
+    correct_answer = index_to_answer(labels[idx].item())
+    if r:
+        print(f"For the question {idx}, model answered correctly, answer is {model_answer}")
+    else:
+        print(f"For the question {idx}, model answered incorrectly, answer is not {model_answer} but {correct_answer}")
 ```
 
 This model was contributed by [vblagoje](https://huggingface.co/vblagoje).

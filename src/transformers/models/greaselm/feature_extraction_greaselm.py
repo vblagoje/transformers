@@ -23,17 +23,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
-import spacy
 import torch
+from torch.nn import CrossEntropyLoss
+
+import spacy
 from huggingface_hub import hf_hub_download
 from spacy.matcher import Matcher
-from torch.nn import CrossEntropyLoss
-from .utils_greaselm import nltk_stopwords
-
 from transformers import AutoModelForMaskedLM, AutoTokenizer
+
 from ...feature_extraction_utils import FeatureExtractionMixin, PreTrainedFeatureExtractor
 from ...utils import TensorType, logging
 from ...utils.logging import get_verbosity, tqdm
+from .utils_greaselm import nltk_stopwords
+
 
 blacklist = [
     "-PRON-",
@@ -88,8 +90,8 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
     This feature extractor inherits from [`FeatureExtractionMixin`] which contains most of the main methods. Users
     should refer to this superclass for more information regarding those methods.
 
-    ['GreaseLMFeatureExtractor'] convert CommonSenseQA or OpenBookQA question-answer example(s) into a
-    batch of graph encodings.
+    ['GreaseLMFeatureExtractor'] convert CommonSenseQA or OpenBookQA question-answer example(s) into a batch of graph
+    encodings.
 
     Args:
         cpnet_vocab_path (`Union[Path, str]`, defaults to concept.txt):
@@ -156,12 +158,12 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
 
         Args:
             question_answer_example (`List[Dict[str, Any]]`):
-                A question-answer example or a batch of question-answer examples from CommonSenseQA
-                or OpenBookQA datasets.
+                A question-answer example or a batch of question-answer examples from CommonSenseQA or OpenBookQA
+                datasets.
 
             entailed_question_answer_example (`List[Dict[str, Any]]`):
-                An entailed question-answer example or a batch of question-answer examples from
-                CommonSenseQA or OpenBookQA datasets.
+                An entailed question-answer example or a batch of question-answer examples from CommonSenseQA or
+                OpenBookQA datasets.
 
             num_choices (`int`, *optional*, defaults to `5`):
                 Number of choices to in the input example
@@ -175,7 +177,7 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
             - concept_ids: (batch_size, num_choices, max_node_num)
             - node_type_ids: (batch_size, num_choices, max_node_num)
             - node_scores: (batch_size, num_choices, max_node_num, 1)
-            - adj_lengths: (batch_size,　num_choices)
+            - adj_lengths: (batch_size, num_choices)
             - special_nodes_mask: (batch_size, num_choices, max_node_num)
             - edge_index: list of size (batch_size, num_choices), where each entry is tensor[2, E]
             - edge_type: list of size (batch_size, num_choices), where each entry is tensor[E, ]
@@ -183,24 +185,28 @@ class GreaseLMFeatureExtractor(FeatureExtractionMixin):
         # Check for valid input
         if isinstance(question_answer_example, list) and isinstance(entailed_question_answer_example, list):
             assert len(question_answer_example) == len(entailed_question_answer_example)
-            assert all([isinstance(e, dict) for e in question_answer_example]) and \
-                   all([isinstance(e, dict) for e in entailed_question_answer_example])
+            assert all([isinstance(e, dict) for e in question_answer_example]) and all(
+                [isinstance(e, dict) for e in entailed_question_answer_example]
+            )
         elif isinstance(question_answer_example, dict) and isinstance(entailed_question_answer_example, dict):
             # add batch dimension
             question_answer_example = [question_answer_example]
             entailed_question_answer_example = [entailed_question_answer_example]
         else:
-            raise ValueError("Input parameters 'question_answer_example' and 'entailed_question_answer_example' must be"
-                             " a Union[Dict[str, Any], List[Dict[str, Any]]] not "
-                             f"{type(question_answer_example)} and {type(entailed_question_answer_example)}")
+            raise ValueError(
+                "Input parameters 'question_answer_example' and 'entailed_question_answer_example' must be"
+                " a Union[Dict[str, Any], List[Dict[str, Any]]] not "
+                f"{type(question_answer_example)} and {type(entailed_question_answer_example)}"
+            )
 
         batch_features = []
         for question_answer_example, entailed_statement in zip(
             question_answer_example, entailed_question_answer_example
         ):
             grouned_statements = self.ground(entailed_statement)
-            example_features = self.generate_adj_data_from_grounded_concepts__use_lm(question_answer_example,
-                                                                                     grouned_statements)
+            example_features = self.generate_adj_data_from_grounded_concepts__use_lm(
+                question_answer_example, grouned_statements
+            )
             batch_features.extend(example_features)
         return self.load_sparse_adj_data_with_contextnode(batch_features, num_choices)
 

@@ -19,22 +19,24 @@ from pathlib import Path
 from typing import Union
 
 from transformers import GreaseLMFeatureExtractor
-from transformers.models.greaselm.utils_greaselm import convert_commonsenseqa_to_entailment, \
-    convert_openbookqa_to_entailment
-from transformers.testing_utils import require_torch, slow, require_torch_scatter
+from transformers.models.greaselm.utils_greaselm import (
+    convert_commonsenseqa_to_entailment,
+    convert_openbookqa_to_entailment,
+)
+from transformers.testing_utils import require_torch, require_torch_scatter, slow
 
 from ...test_feature_extraction_common import FeatureExtractionSavingTestMixin
 
 
 class GreaseLMFeatureExtractionTester(unittest.TestCase):
     def __init__(
-            self,
-            cpnet_vocab_path: Union[Path, str] = "concept.txt",
-            pattern_path: Union[Path, str] = "matcher_patterns.json",
-            pruned_graph_path: Union[Path, str] = "conceptnet.en.pruned.graph",
-            score_model: Union[Path, str] = "distilroberta-base",
-            device: str = "cpu",
-            cxt_node_connects_all: bool = False,
+        self,
+        cpnet_vocab_path: Union[Path, str] = "concept.txt",
+        pattern_path: Union[Path, str] = "matcher_patterns.json",
+        pruned_graph_path: Union[Path, str] = "conceptnet.en.pruned.graph",
+        score_model: Union[Path, str] = "distilroberta-base",
+        device: str = "cpu",
+        cxt_node_connects_all: bool = False,
     ):
         self.cpnet_vocab_path = cpnet_vocab_path
         self.pattern_path = pattern_path
@@ -44,12 +46,14 @@ class GreaseLMFeatureExtractionTester(unittest.TestCase):
         self.cxt_node_connects_all = cxt_node_connects_all
 
     def prepare_feat_extract_dict(self):
-        return {"cpnet_vocab_path": self.cpnet_vocab_path,
-                "pattern_path": self.pattern_path,
-                "pruned_graph_path": self.pruned_graph_path,
-                "score_model": self.score_model,
-                "device": self.device,
-                "cxt_node_connects_all": self.cxt_node_connects_all}
+        return {
+            "cpnet_vocab_path": self.cpnet_vocab_path,
+            "pattern_path": self.pattern_path,
+            "pruned_graph_path": self.pruned_graph_path,
+            "score_model": self.score_model,
+            "device": self.device,
+            "cxt_node_connects_all": self.cxt_node_connects_all,
+        }
 
 
 @require_torch
@@ -83,14 +87,21 @@ class GreaseLMFeatureExtractionTest(FeatureExtractionSavingTestMixin, unittest.T
     @slow
     def test_common_sense_qa_feature_extraction(self):
         self.fe.start()  # start (if not already started) the feature extractor, takes ~ 2min
-        csqa_example = {"answerKey": "A", "id": "1afa02df02c908a558b4036e80242fac",
-                        "question": {"question_concept": "revolving door",
-                                     "choices": [{"label": "A", "text": "bank"},
-                                                 {"label": "B", "text": "library"},
-                                                 {"label": "C", "text": "department store"},
-                                                 {"label": "D", "text": "mall"},
-                                                 {"label": "E", "text": "new york"}],
-                                     "stem": "A revolving door is convenient for two direction travel, but it also serves as a security measure at a what?"}}
+        csqa_example = {
+            "answerKey": "A",
+            "id": "1afa02df02c908a558b4036e80242fac",
+            "question": {
+                "question_concept": "revolving door",
+                "choices": [
+                    {"label": "A", "text": "bank"},
+                    {"label": "B", "text": "library"},
+                    {"label": "C", "text": "department store"},
+                    {"label": "D", "text": "mall"},
+                    {"label": "E", "text": "new york"},
+                ],
+                "stem": "A revolving door is convenient for two direction travel, but it also serves as a security measure at a what?",
+            },
+        }
 
         num_choices = 5
         max_node_num = 200
@@ -100,18 +111,20 @@ class GreaseLMFeatureExtractionTest(FeatureExtractionSavingTestMixin, unittest.T
         graph_representation = self.fe([csqa_example], [entailed_example], num_choices=num_choices)
 
         # Verify the extracted graph representation
-        expected_shape = {'concept_ids': (1, num_choices, max_node_num),
-                          'node_type_ids': (1, num_choices, max_node_num),
-                          'node_scores': (1, num_choices, max_node_num, 1),
-                          'adj_lengths': (1, num_choices),
-                          'special_nodes_mask': (1, num_choices, max_node_num),
-                          'edge_index': num_choices,
-                          'edge_type': num_choices}
+        expected_shape = {
+            "concept_ids": (1, num_choices, max_node_num),
+            "node_type_ids": (1, num_choices, max_node_num),
+            "node_scores": (1, num_choices, max_node_num, 1),
+            "adj_lengths": (1, num_choices),
+            "special_nodes_mask": (1, num_choices, max_node_num),
+            "edge_index": num_choices,
+            "edge_type": num_choices,
+        }
 
         self.assertEqual(len(graph_representation), len(expected_shape.keys()))
         self.assertTrue(all([k in graph_representation for k in expected_shape.keys()]))
         for key, value in expected_shape.items():
-            if key == 'edge_index' or key == 'edge_type':
+            if key == "edge_index" or key == "edge_type":
                 self.assertEqual(len(graph_representation[key][0]), value)
             else:
                 self.assertEqual(graph_representation[key].shape, value)
@@ -119,11 +132,19 @@ class GreaseLMFeatureExtractionTest(FeatureExtractionSavingTestMixin, unittest.T
     @slow
     def test_openbook_qa_feature_extraction(self):
         self.fe.start()  # start (if not already started) the feature extractor, takes ~ 2min
-        obqa_example = {"id": "1953", "question": {"stem": "Which organism cannot specialize?",
-                                                   "choices": [{"text": "mammal", "label": "A"},
-                                                               {"text": "plant", "label": "B"},
-                                                               {"text": "fish", "label": "C"},
-                                                               {"text": "protozoa", "label": "D"}]}, "answerKey": "D"}
+        obqa_example = {
+            "id": "1953",
+            "question": {
+                "stem": "Which organism cannot specialize?",
+                "choices": [
+                    {"text": "mammal", "label": "A"},
+                    {"text": "plant", "label": "B"},
+                    {"text": "fish", "label": "C"},
+                    {"text": "protozoa", "label": "D"},
+                ],
+            },
+            "answerKey": "D",
+        }
 
         num_choices = 4
         max_node_num = 200
@@ -133,18 +154,20 @@ class GreaseLMFeatureExtractionTest(FeatureExtractionSavingTestMixin, unittest.T
         graph_representation = self.fe([obqa_example], [entailed_example], num_choices=num_choices)
 
         # Verify the extracted graph representation
-        expected_shape = {'concept_ids': (1, num_choices, max_node_num),
-                          'node_type_ids': (1, num_choices, max_node_num),
-                          'node_scores': (1, num_choices, max_node_num, 1),
-                          'adj_lengths': (1, num_choices),
-                          'special_nodes_mask': (1, num_choices, max_node_num),
-                          'edge_index': num_choices,
-                          'edge_type': num_choices}
+        expected_shape = {
+            "concept_ids": (1, num_choices, max_node_num),
+            "node_type_ids": (1, num_choices, max_node_num),
+            "node_scores": (1, num_choices, max_node_num, 1),
+            "adj_lengths": (1, num_choices),
+            "special_nodes_mask": (1, num_choices, max_node_num),
+            "edge_index": num_choices,
+            "edge_type": num_choices,
+        }
 
         self.assertEqual(len(graph_representation), len(expected_shape.keys()))
         self.assertTrue(all([k in graph_representation for k in expected_shape.keys()]))
         for key, value in expected_shape.items():
-            if key == 'edge_index' or key == 'edge_type':
+            if key == "edge_index" or key == "edge_type":
                 self.assertEqual(len(graph_representation[key][0]), value)
             else:
                 self.assertEqual(graph_representation[key].shape, value)

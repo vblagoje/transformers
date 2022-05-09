@@ -18,29 +18,33 @@ import math
 import os
 from dataclasses import dataclass
 from os.path import exists as file_exists
-from typing import Optional, Union
-from typing import Tuple
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from huggingface_hub import hf_hub_download
 from packaging import version
 from torch import nn
 from torch.nn import CrossEntropyLoss
 
-from .configuration_greaselm import GreaseLMConfig
-from .utils_greaselm import softmax, MessagePassing, make_one_hot, freeze_net
-from ...utils import is_scatter_available
+from huggingface_hub import hf_hub_download
+
 from ...activations import ACT2FN
 from ...modeling_outputs import MultipleChoiceModelOutput
 from ...modeling_utils import PreTrainedModel
 from ...pytorch_utils import apply_chunking_to_forward, find_pruneable_heads_and_indices, prune_linear_layer
 from ...utils import (
+    ModelOutput,
     add_start_docstrings,
-    logging, ModelOutput, add_start_docstrings_to_model_forward, replace_return_docstrings,
+    add_start_docstrings_to_model_forward,
+    is_scatter_available,
+    logging,
+    replace_return_docstrings,
 )
+from .configuration_greaselm import GreaseLMConfig
+from .utils_greaselm import MessagePassing, freeze_net, make_one_hot, softmax
+
 
 logger = logging.get_logger(__name__)
 
@@ -511,7 +515,6 @@ class GreaseLMEncoder(nn.Module):
             hidden_states=all_hidden_states,
             attentions=all_attentions,
         )
-
 
 
 # Copied from transformers.models.roberta.modeling_roberta.RobertaEmbeddings with Roberta->GreaseLM
@@ -1498,8 +1501,7 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
                    num_choices-1]` where `num_choices` is the size of the second dimension of the input tensors. (See
                    `input_ids` above)
         :param emb_data:
-               torch.tensor(batch_size, number_of_choices, max_node_num, emb_dim)
-               Contextualized embedding data.
+               torch.tensor(batch_size, number_of_choices, max_node_num, emb_dim) Contextualized embedding data.
         """
         bs, nc = input_ids.shape[0:2]
 

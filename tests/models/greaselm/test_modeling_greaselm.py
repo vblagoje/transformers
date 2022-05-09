@@ -19,25 +19,33 @@ import unittest
 from huggingface_hub import hf_hub_download
 from transformers import GreaseLMConfig, is_torch_available
 from transformers.modeling_outputs import MultipleChoiceModelOutput
-from transformers.testing_utils import TestCasePlus, require_torch, slow, torch_device, require_torch_scatter, \
-    require_torch_sparse
+from transformers.testing_utils import (
+    TestCasePlus,
+    require_torch,
+    require_torch_scatter,
+    require_torch_sparse,
+    slow,
+    torch_device,
+)
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ids_tensor, random_attention_mask
+
 
 if is_torch_available():
     import torch
 
     from transformers import GreaseLMForMultipleChoice, GreaseLMModel
     from transformers.models.greaselm.modeling_greaselm import (
-        GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST, GreaseLMModelOutput,
-)
+        GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
+        GreaseLMModelOutput,
+    )
 
 
 class GreaseLMModelTester:
     def __init__(
-            self,
-            parent,
+        self,
+        parent,
     ):
         self.parent = parent
         self.batch_size = 1
@@ -136,7 +144,7 @@ class GreaseLMModelTester:
                 special_nodes_mask,
                 edge_index,
                 edge_type,
-                labels
+                labels,
             )
         else:
             return (
@@ -170,44 +178,65 @@ class GreaseLMModelTester:
         )
 
     def create_and_check_model(
-            self,
-            config,
-            input_ids,
-            attention_mask,
-            token_type_ids,
-            output_mask,
-            concept_ids,
-            node_type_ids,
-            node_scores,
-            adj_lengths,
-            special_nodes_mask,
-            edge_index,
-            edge_type,
+        self,
+        config,
+        input_ids,
+        attention_mask,
+        token_type_ids,
+        output_mask,
+        concept_ids,
+        node_type_ids,
+        node_scores,
+        adj_lengths,
+        special_nodes_mask,
+        edge_index,
+        edge_type,
     ):
         concept_emb = hf_hub_download(repo_id="Xikun/greaselm-csqa", filename="tzw.ent.npy")
         model = GreaseLMModel(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
         model.eval()
-        result = model(input_ids=input_ids,
-                       attention_mask=attention_mask,
-                       token_type_ids=token_type_ids,
-                       special_tokens_mask=output_mask,
-                       concept_ids=concept_ids,
-                       node_type_ids=node_type_ids,
-                       node_scores=node_scores,
-                       adj_lengths=adj_lengths,
-                       special_nodes_mask=special_nodes_mask,
-                       edge_index=edge_index,
-                       edge_type=edge_type)
+        result = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            special_tokens_mask=output_mask,
+            concept_ids=concept_ids,
+            node_type_ids=node_type_ids,
+            node_scores=node_scores,
+            adj_lengths=adj_lengths,
+            special_nodes_mask=special_nodes_mask,
+            edge_index=edge_index,
+            edge_type=edge_type,
+        )
 
         self.parent.assertTrue(isinstance(result, GreaseLMModelOutput))
-        self.parent.assertEqual(result.last_hidden_state.shape,
-                                (self.batch_size * self.num_choices, self.seq_length, self.hidden_size))
-        self.parent.assertEqual(result.last_hidden_gnn_state.shape,
-                                (self.batch_size * self.num_choices, self.max_node_num, self.concept_dim))
+        self.parent.assertEqual(
+            result.last_hidden_state.shape, (self.batch_size * self.num_choices, self.seq_length, self.hidden_size)
+        )
+        self.parent.assertEqual(
+            result.last_hidden_gnn_state.shape,
+            (self.batch_size * self.num_choices, self.max_node_num, self.concept_dim),
+        )
 
     def create_and_check_encoder(
-            self,
+        self,
+        hidden_states,
+        attention_mask,
+        special_tokens_mask,
+        head_mask,
+        H,
+        edge_index,
+        edge_type,
+        node_type_ids,
+        node_feature_extra,
+        special_nodes_mask,
+    ):
+        concept_emb = hf_hub_download(repo_id="Xikun/greaselm-csqa", filename="tzw.ent.npy")
+        model = GreaseLMModel(config=self.get_config(), pretrained_concept_emb_file=concept_emb)
+        model.to(torch_device)
+        model.eval()
+        result = model.encoder(
             hidden_states,
             attention_mask,
             special_tokens_mask,
@@ -218,56 +247,44 @@ class GreaseLMModelTester:
             node_type_ids,
             node_feature_extra,
             special_nodes_mask,
-    ):
-        concept_emb = hf_hub_download(repo_id="Xikun/greaselm-csqa", filename="tzw.ent.npy")
-        model = GreaseLMModel(config=self.get_config(), pretrained_concept_emb_file=concept_emb)
-        model.to(torch_device)
-        model.eval()
-        result = model.encoder(hidden_states,
-                               attention_mask,
-                               special_tokens_mask,
-                               head_mask,
-                               H,
-                               edge_index,
-                               edge_type,
-                               node_type_ids,
-                               node_feature_extra,
-                               special_nodes_mask)
+        )
 
         assert isinstance(result, GreaseLMModelOutput)
 
     def create_and_check_for_multiple_choice(
-            self,
-            config,
-            input_ids,
-            attention_mask,
-            token_type_ids,
-            special_tokens_mask,
-            concept_ids,
-            node_type_ids,
-            node_scores,
-            adj_lengths,
-            special_nodes_mask,
-            edge_index,
-            edge_type,
-            labels,
+        self,
+        config,
+        input_ids,
+        attention_mask,
+        token_type_ids,
+        special_tokens_mask,
+        concept_ids,
+        node_type_ids,
+        node_scores,
+        adj_lengths,
+        special_nodes_mask,
+        edge_index,
+        edge_type,
+        labels,
     ):
         config.num_choices = self.num_choices
         concept_emb = hf_hub_download(repo_id="Xikun/greaselm-csqa", filename="tzw.ent.npy")
         model = GreaseLMForMultipleChoice(config=config, pretrained_concept_emb_file=concept_emb)
         model.to(torch_device)
-        result = model(input_ids=input_ids,
-                       attention_mask=attention_mask,
-                       token_type_ids=token_type_ids,
-                       special_tokens_mask=special_tokens_mask,
-                       concept_ids=concept_ids,
-                       node_type_ids=node_type_ids,
-                       node_scores=node_scores,
-                       adj_lengths=adj_lengths,
-                       special_nodes_mask=special_nodes_mask,
-                       edge_index=edge_index,
-                       edge_type=edge_type,
-                       labels=labels)
+        result = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            special_tokens_mask=special_tokens_mask,
+            concept_ids=concept_ids,
+            node_type_ids=node_type_ids,
+            node_scores=node_scores,
+            adj_lengths=adj_lengths,
+            special_nodes_mask=special_nodes_mask,
+            edge_index=edge_index,
+            edge_type=edge_type,
+            labels=labels,
+        )
 
         self.parent.assertTrue(isinstance(result, MultipleChoiceModelOutput))
         self.parent.assertTrue("loss" in result)
@@ -332,7 +349,6 @@ class GreaseLMModelTest(unittest.TestCase):
 @require_torch_scatter
 @require_torch_sparse
 class GreaseLMModelIntegrationTest(TestCasePlus):
-
     def test_inference_no_head(self):
         model = GreaseLMModel.from_pretrained("Xikun/greaselm-csqa")
         # TODO: add more tests, basic case tested in GreaseLMModelTest::test_model
