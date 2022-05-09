@@ -23,7 +23,7 @@ import torch
 from ...processing_utils import ProcessorMixin
 from ...tokenization_utils_base import BatchEncoding
 from ...utils.logging import tqdm
-from .greaselm_utils import convert_commonsenseqa_to_entailment, convert_openbookqa_to_entailment
+from .utils_greaselm import convert_commonsenseqa_to_entailment, convert_openbookqa_to_entailment
 
 
 class GreaseLMProcessor(ProcessorMixin):

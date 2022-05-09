@@ -28,7 +28,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from spacy.matcher import Matcher
 from torch.nn import CrossEntropyLoss
-from .greaselm_utils import nltk_stopwords
+from .utils_greaselm import nltk_stopwords
 
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 from ...feature_extraction_utils import FeatureExtractionMixin, PreTrainedFeatureExtractor

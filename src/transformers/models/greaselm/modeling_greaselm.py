@@ -31,7 +31,7 @@ from torch.nn import CrossEntropyLoss
 from torch_scatter import scatter
 
 from .configuration_greaselm import GreaseLMConfig
-from .greaselm_utils import softmax, MessagePassing, make_one_hot, freeze_net
+from .utils_greaselm import softmax, MessagePassing, make_one_hot, freeze_net
 from ...activations import ACT2FN
 from ...modeling_outputs import MultipleChoiceModelOutput
 from ...modeling_utils import PreTrainedModel
