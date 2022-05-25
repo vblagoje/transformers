@@ -657,38 +657,6 @@ else:
         ]
     )
 
-try:
-    if not (is_spacy_available() and is_torch_available()):
-        raise OptionalDependencyNotAvailable()
-except OptionalDependencyNotAvailable:
-    from .utils import dummy_scatter_and_sparse_objects
-
-    _import_structure["utils.dummy_scatter_and_sparse_objects"] = [
-        name for name in dir(dummy_scatter_and_sparse_objects) if not name.startswith("_")
-    ]
-
-else:
-    _import_structure["models.greaselm"].extend(["GreaseLMFeatureExtractor", "GreaseLMProcessor"])
-
-try:
-    if not (is_scatter_available() and is_sparse_available()):
-        raise OptionalDependencyNotAvailable()
-except OptionalDependencyNotAvailable:
-    from .utils import dummy_scatter_and_sparse_objects
-
-    _import_structure["utils.dummy_scatter_and_sparse_objects"] = [
-        name for name in dir(dummy_scatter_and_sparse_objects) if not name.startswith("_")
-    ]
-else:
-    _import_structure["models.greaselm"].extend(
-        [
-            "GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
-            "GreaseLMForMultipleChoice",
-            "GreaseLMModel",
-            "GreaseLMPreTrainedModel",
-        ]
-    )
-
 # PyTorch-backed objects
 try:
     if not is_torch_available():
@@ -1199,6 +1167,16 @@ else:
             "GPTJForSequenceClassification",
             "GPTJModel",
             "GPTJPreTrainedModel",
+        ]
+    )
+    _import_structure["models.greaselm"].extend(
+        [
+            "GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "GreaseLMForMultipleChoice",
+            "GreaseLMModel",
+            "GreaseLMPreTrainedModel",
+            "GreaseLMFeatureExtractor",
+            "GreaseLMProcessor",
         ]
     )
     _import_structure["models.hubert"].extend(
@@ -3183,29 +3161,6 @@ if TYPE_CHECKING:
         )
 
     try:
-        if not (is_torch_available() and is_spacy_available()):
-            raise OptionalDependencyNotAvailable()
-    except OptionalDependencyNotAvailable:
-        from .utils.dummy_scatter_and_sparse_objects import *
-
-    else:
-        from .models.greaselm import GreaseLMFeatureExtractor, GreaseLMProcessor
-
-    try:
-        if not (is_scatter_available() and is_sparse_available()):
-            raise OptionalDependencyNotAvailable()
-    except OptionalDependencyNotAvailable:
-        from .utils.dummy_scatter_and_sparse_objects import *
-
-    else:
-        from .models.greaselm import (
-            GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
-            GreaseLMForMultipleChoice,
-            GreaseLMModel,
-            GreaseLMPreTrainedModel,
-        )
-
-    try:
         if not is_torch_available():
             raise OptionalDependencyNotAvailable()
     except OptionalDependencyNotAvailable:
@@ -3641,6 +3596,14 @@ if TYPE_CHECKING:
             GPTJForSequenceClassification,
             GPTJModel,
             GPTJPreTrainedModel,
+        )
+        from .models.greaselm import (
+            GREASELM_PRETRAINED_MODEL_ARCHIVE_LIST,
+            GreaseLMFeatureExtractor,
+            GreaseLMForMultipleChoice,
+            GreaseLMModel,
+            GreaseLMPreTrainedModel,
+            GreaseLMProcessor,
         )
         from .models.hubert import (
             HUBERT_PRETRAINED_MODEL_ARCHIVE_LIST,

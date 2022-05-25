@@ -18,22 +18,7 @@
 
 from typing import TYPE_CHECKING
 
-from ...utils import (
-    OptionalDependencyNotAvailable,
-    _LazyModule,
-    is_scatter_available,
-    is_spacy_available,
-    is_sparse_available,
-    is_torch_available,
-)
-
-
-def is_greaselm_available():
-    return is_sparse_available() and is_scatter_available()
-
-
-def is_torch_and_spacy_available():
-    return is_torch_available() and is_spacy_available()
+from ...utils import OptionalDependencyNotAvailable, _LazyModule, is_torch_available
 
 
 _import_structure = {
@@ -41,7 +26,7 @@ _import_structure = {
 }
 
 try:
-    if not is_torch_and_spacy_available():
+    if not is_torch_available():
         raise OptionalDependencyNotAvailable()
 except OptionalDependencyNotAvailable:
     pass
@@ -50,7 +35,7 @@ else:
     _import_structure["processing_greaselm"] = ["GreaseLMProcessor"]
 
 try:
-    if not is_greaselm_available():
+    if not is_torch_available():
         raise OptionalDependencyNotAvailable()
 except OptionalDependencyNotAvailable:
     pass
@@ -66,7 +51,7 @@ if TYPE_CHECKING:
     from .configuration_greaselm import GREASELM_PRETRAINED_CONFIG_ARCHIVE_MAP, GreaseLMConfig
 
     try:
-        if not is_torch_and_spacy_available():
+        if not is_torch_available():
             raise OptionalDependencyNotAvailable()
     except OptionalDependencyNotAvailable:
         pass
@@ -75,7 +60,7 @@ if TYPE_CHECKING:
         from .processing_greaselm import GreaseLMProcessor
 
     try:
-        if not is_greaselm_available():
+        if not is_torch_available():
             raise OptionalDependencyNotAvailable()
     except OptionalDependencyNotAvailable:
         pass

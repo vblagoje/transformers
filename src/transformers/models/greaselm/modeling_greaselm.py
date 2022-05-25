@@ -269,7 +269,7 @@ def maybe_num_nodes(edge_index, num_nodes=None):  # noqa: F811
         return max(edge_index.size(0), edge_index.size(1))
 
 
-if is_scatter_available():
+if is_sparse_available():
 
     @torch.jit.script
     def softmax(
