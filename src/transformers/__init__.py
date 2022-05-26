@@ -34,8 +34,6 @@ from .utils import (
     is_flax_available,
     is_scatter_available,
     is_sentencepiece_available,
-    is_spacy_available,
-    is_sparse_available,
     is_speech_available,
     is_tf_available,
     is_timm_available,

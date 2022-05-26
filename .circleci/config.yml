@@ -897,7 +897,6 @@ jobs:
                       - v0.4-{{ checksum "setup.py" }}
             - run: pip install --upgrade pip
             - run: pip install .[all,quality]
-            - run: pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.11.0+cpu.html
             - save_cache:
                   key: v0.4-repository_consistency-{{ checksum "setup.py" }}
                   paths:
@@ -929,10 +928,6 @@ jobs:
             - run: sudo apt-get -y update && sudo apt-get install -y libsndfile1-dev
             - run: pip install --upgrade pip
             - run: pip install .[torch,testing,vision]
-            - run: pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.11.0+cpu.html
-            - run: pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-1.11.0+cpu.html
-            - run: pip install spacy
-            - run: pip install https://huggingface.co/spacy/en_core_web_sm/resolve/main/en_core_web_sm-any-py3-none-any.whl
             - run: pip install torchvision
             - run: python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'
             - run: sudo apt install tesseract-ocr
