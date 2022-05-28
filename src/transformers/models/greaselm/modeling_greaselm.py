@@ -1423,17 +1423,12 @@ class GreaseLMEncoder(nn.Module):
     def __init__(self, config, dropout=0.2):
         super().__init__()
         self.config = config
-        self.edge_encoder = torch.nn.Sequential(
-            torch.nn.Linear(config.num_edge_types + 1 + config.num_node_types * 2, config.gnn_hidden_size),
-            torch.nn.BatchNorm1d(config.gnn_hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(config.gnn_hidden_size, config.gnn_hidden_size),
-        )
+        self.edge_encoder = self.create_edge_encoder()
 
         self.layer = nn.ModuleList([GreaseLMLayer(config) for _ in range(config.num_hidden_layers)])
         self.gnn_layers = nn.ModuleList(
             [
-                GATConvE(config.gnn_hidden_size, config.num_node_types, config.num_edge_types, self.edge_encoder)
+                GATConvE(config.gnn_hidden_size, config.num_node_types, config.num_edge_types, self.create_edge_encoder())
                 for _ in range(config.num_gnn_layers)
             ]
         )
@@ -1460,6 +1455,14 @@ class GreaseLMEncoder(nn.Module):
 
         self.num_hidden_layers = config.num_hidden_layers
         self.info_exchange = config.info_exchange
+
+    def create_edge_encoder(self):
+        return torch.nn.Sequential(
+            torch.nn.Linear(self.config.num_edge_types + 1 + self.config.num_node_types * 2, self.config.gnn_hidden_size),
+            torch.nn.BatchNorm1d(self.config.gnn_hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.config.gnn_hidden_size, self.config.gnn_hidden_size),
+        )
 
     def forward(
         self,
@@ -2469,7 +2472,6 @@ class GreaseLMForMultipleChoice(GreaseLMPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"greaselm.concept_emb.emb.weight"]
 
     def __init__(self, config, pretrained_concept_emb_file=None):
-        requires_backends(self, ["scatter", "sparse"])
         super().__init__(config)
         self.greaselm = GreaseLMModel(config, pretrained_concept_emb_file=pretrained_concept_emb_file)
         self.pooler = (
